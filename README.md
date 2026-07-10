@@ -33,11 +33,10 @@ Follow any restart prompt, then tell one agent to talk to the other.
 Examples:
 
 - Ask Agent Two to review this API contract for implementation risks.
-- Ask the code-review agent to inspect this diff for regressions.
+- When done, send the spec to Spec Reviewer for deliberation until Green.  Implement, then after implementation review with Code Reviewer.
 - Ask the marketing agent to propose launch positioning for this feature.
-- Ask Construct and Pattern Buffer to review their integration spec for incompatible assumptions.
-- Ask Kernos whether its invitation workflow solves a similar onboarding problem and what differs here.
-- Ask Pattern Buffer to describe its bounded temporal-read mechanism, what transfers here, and what must change.
+- Ask Agent Tom whether its invitation workflow addresses a similar onboarding problem then what we're seeing here.
+- Ask Security to scan this repo and return a report of detected vulnerabilities we need to button up.
 
 ## What it does
 
