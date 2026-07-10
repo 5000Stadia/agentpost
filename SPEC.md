@@ -1,6 +1,11 @@
 # AgentPost v0 Initial Specification
 
-Status: implemented local prototype; packaging and final acceptance in progress
+> Historical design record: the core, Claude Code, Codex, and Python portions
+> were implemented from this specification. Its Gemini CLI extension and ACP
+> sections predate Google's 2026 consumer migration to Antigravity CLI and are
+> superseded by `ROADMAP.md`; do not implement those sections as current work.
+
+Status: implemented v0; retained as design and acceptance history
 Working project name: AgentPost / Agent Post Office
 Working CLI name: agentpost
 Created: 2026-07-09

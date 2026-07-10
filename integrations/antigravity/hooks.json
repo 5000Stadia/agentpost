@@ -1,0 +1,18 @@
+{
+  "agentpost": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "agentpost internal-antigravity-hook pre-invocation",
+        "timeout": 10
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "agentpost internal-antigravity-hook stop",
+        "timeout": 10
+      }
+    ]
+  }
+}

@@ -188,7 +188,8 @@ files explicitly.
   "current maximum" watermark.
 - Same-second sends remain ordered by immutable filename/Message-ID rules, not
   timestamp alone.
-- Gemini remains the final adapter after the four-agent migration.
+- The then-planned Gemini adapter was deferred. Google subsequently moved
+  consumer CLI users to Antigravity CLI; `ROADMAP.md` now controls that work.
 
 ## Next Slice
 

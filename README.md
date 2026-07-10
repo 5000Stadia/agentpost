@@ -1,9 +1,9 @@
 # AgentPost
 
 AgentPost is a trusted-local post office for already-running agents. It gives
-Claude Code, Codex, and embedded Python agent systems durable Markdown
-mailboxes, agent discovery, direct and group questions, and two attention
-modes without consuming model tokens while waiting.
+Claude Code, Codex, Antigravity CLI, and embedded Python agent systems durable
+Markdown mailboxes, agent discovery, direct and group questions, and two
+attention modes without consuming model tokens while waiting.
 
 Installed CLI agents treat it as a named communication channel. A human can
 say "send it to PB" or "ask the reviewers"; the integration resolves the
@@ -23,7 +23,7 @@ ln -sf ~/.local/share/agentpost/venv/bin/agentpost ~/.local/bin/agentpost
 agentpost init --connection-mode auto
 ```
 
-Open the first project in Claude Code or Codex and say:
+Open the first project in Claude Code, Codex, or Antigravity CLI and say:
 
 > Add this project to AgentPost as Agent One.
 
@@ -51,8 +51,8 @@ The agents resolve the address, send one durable message, and report whether it
 was delivered live or queued for later. You do not need to manage inbox files
 or repeat the request through another service.
 
-For a tested two-agent walkthrough, runtime-specific Claude Code, Codex, and
-Python instructions, and the exact underlying commands, see
+For a tested two-agent walkthrough, runtime-specific Claude Code, Codex,
+Antigravity, and Python instructions, and the exact underlying commands, see
 [Two-agent quick start](docs/TWO_AGENT_QUICKSTART.md).
 
 ## What it does
@@ -71,6 +71,14 @@ Python instructions, and the exact underlying commands, see
 
 AgentPost needs Python 3.11+. The Codex real-time adapter also needs Node.js 22+
 (the normal npm Codex install already supplies it on most systems).
+
+Antigravity CLI 1.1.1 has a validated lifecycle catch-up profile. Its plugin
+injects exact unread Message-IDs before an invocation and at the completed
+`Stop` boundary. Antigravity does not currently document an external input edge
+for waking a TUI that is already idle, so AgentPost reports those deliveries as
+queued until the next prompt or lifecycle boundary. Launch it with `agentpost
+antigravity --agent NAME` after joining so shared project roots retain the
+correct sender identity.
 
 The natural-language setup above asks each coding agent to perform these
 underlying operations:
@@ -216,6 +224,15 @@ sender-bound `AgentChannel` exposes the same identity resolution and
 claims mail; the host scheduler remains responsible for turn creation and work
 admission. See [Python integration](docs/PYTHON.md).
 
+## Adapter capabilities
+
+| Runtime | Catch-up | Active-turn immediate | Post-turn idle | Already-idle wake |
+| --- | --- | --- | --- | --- |
+| Claude Code | Yes | Yes | Yes | Yes |
+| Codex managed launcher | Yes | Yes | Yes | Yes |
+| Antigravity CLI | Yes | Next lifecycle boundary | Yes | Not yet supported |
+| Embedded Python | Yes | Host scheduler | Host scheduler | Host scheduler |
+
 ## Documentation
 
 - [Installation and recovery](docs/INSTALL.md)
@@ -223,6 +240,7 @@ admission. See [Python integration](docs/PYTHON.md).
 - [Mailbox protocol](docs/PROTOCOL.md)
 - [Python integration](docs/PYTHON.md)
 - [Legacy inbox migration](docs/MIGRATION.md)
+- [Roadmap and parked work](ROADMAP.md)
 - [Detailed design and acceptance criteria](SPEC.md)
 - [Prior-art evaluation](PRIOR_ART_EVALUATION.md)
 - [Current implementation status](IMPLEMENTATION_STATUS.md)

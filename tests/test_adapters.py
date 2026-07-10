@@ -21,6 +21,8 @@ from agentpost import (  # noqa: E402
     RecordingBell,
 )
 from agentpost.native import (  # noqa: E402
+    antigravity_hook,
+    antigravity_launch,
     _claude_boundary_state,
     _codex_bridge_marker,
     _codex_remote_command,
@@ -227,6 +229,111 @@ class AdapterTest(unittest.TestCase):
         binding = office.list_bindings()[0]
         self.assertEqual((binding.agent, binding.cli), ("cx", "codex"))
         self.assertEqual(binding.project, str(project.resolve()))
+
+    def test_antigravity_hooks_inject_each_unread_id_once_without_claiming(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "antigravity-project"
+        project.mkdir()
+        office.register_profile(
+            Profile(
+                name="ag",
+                display_name="Antigravity",
+                cli="antigravity",
+                kind="project",
+                summary="Antigravity integration test",
+                projects=("antigravity-test",),
+                project_roots=(str(project),),
+            )
+        )
+        first = office.send("cx", "ag", "first")
+        event = {
+            "conversationId": "conversation-1",
+            "workspacePaths": [str(project)],
+        }
+
+        output = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+            with patch("sys.stdin", StringIO(json.dumps(event))), redirect_stdout(output):
+                self.assertEqual(antigravity_hook("pre-invocation"), 0)
+        injected = json.loads(output.getvalue())
+        self.assertIn(first.message_id, injected["injectSteps"][0]["ephemeralMessage"])
+        self.assertEqual(len(office.list_messages("ag", "unread")), 1)
+        self.assertEqual(agent_presence(office, "ag").state, "working")
+
+        output = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+            with patch("sys.stdin", StringIO(json.dumps(event))), redirect_stdout(output):
+                antigravity_hook("pre-invocation")
+        self.assertEqual(json.loads(output.getvalue()), {"injectSteps": []})
+
+        second = office.send("cx", "ag", "second")
+        stop_event = {**event, "fullyIdle": True}
+        output = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+            with patch("sys.stdin", StringIO(json.dumps(stop_event))), redirect_stdout(output):
+                antigravity_hook("stop")
+        stopped = json.loads(output.getvalue())
+        self.assertEqual(stopped["decision"], "continue")
+        self.assertIn(second.message_id, stopped["reason"])
+        self.assertNotIn(first.message_id, stopped["reason"])
+        self.assertEqual(len(office.list_messages("ag", "unread")), 2)
+        self.assertEqual(agent_presence(office, "ag").state, "idle")
+        self.assertFalse(armed(office, "ag")[0])
+
+    def test_antigravity_install_validates_plugin_and_records_binding(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "antigravity-project"
+        project.mkdir()
+        office.register_profile(
+            Profile(
+                name="ag",
+                display_name="Antigravity",
+                cli="antigravity",
+                kind="project",
+                summary="Antigravity integration test",
+                projects=("antigravity-test",),
+                project_roots=(str(project),),
+            )
+        )
+        with patch("agentpost.installer._integration_source", return_value=project):
+            with patch("agentpost.installer._run") as run:
+                install(office, "antigravity", "ag", project)
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [
+                ["agy", "plugin", "validate", str(project)],
+                ["agy", "plugin", "install", str(project)],
+            ],
+        )
+        binding = office.list_bindings()[0]
+        self.assertEqual((binding.agent, binding.cli), ("ag", "antigravity"))
+        self.assertEqual(binding.project, str(project.resolve()))
+
+    def test_antigravity_launcher_sets_the_per_process_mailbox(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "shared-project"
+        project.mkdir()
+        office.register_profile(
+            Profile(
+                name="ag",
+                display_name="Antigravity",
+                cli="antigravity",
+                kind="project",
+                summary="Antigravity integration test",
+                projects=("shared",),
+                project_roots=(str(project),),
+            )
+        )
+        office.bind_agent("ag", "antigravity", project)
+        with patch("agentpost.native.subprocess.call", return_value=0) as call:
+            self.assertEqual(
+                antigravity_launch(office, project, ["--model", "auto"], agent="ag"),
+                0,
+            )
+        command = call.call_args.args[0]
+        environment = call.call_args.kwargs["env"]
+        self.assertEqual(command, ["agy", "--model", "auto"])
+        self.assertEqual(environment["AGENTPOST_AGENT"], "ag")
 
 
 if __name__ == "__main__":

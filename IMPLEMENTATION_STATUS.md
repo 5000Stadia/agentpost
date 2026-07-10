@@ -38,6 +38,9 @@ or the original data directories.
   catch-up, `turn/steer`, idle deferral, exact-ID processing, and fallback-hook
   ownership suppression.
 - Claude/Codex install, static doctor, and mailbox-preserving uninstall commands.
+- Antigravity CLI 1.1.1 plugin, install/doctor/uninstall path, non-claiming
+  PreInvocation catch-up, and Stop-boundary delivery with honest degraded
+  already-idle wake reporting.
 - Live adapter heartbeats/ownership, `agentpost armed`, and sender-side
   catch-up-only warnings after durable delivery.
 - Durable `(CLI, project root)` bindings, automatic known-project reconnect,
@@ -75,9 +78,9 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 69 passing tests. Twenty consecutive full-suite
-runs passed after the concurrency and UTF-8 fixes. A clean Python virtual
-environment editable install and executable smoke test also passed.
+The current suite contains 73 passing tests. Twenty consecutive pre-Antigravity
+full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
+virtual environment editable install and executable smoke test also passed.
 
 A wheel was built and installed into a clean temporary home. Its bundled Codex
 marketplace installed without the source checkout, static doctor stopped at the
@@ -90,10 +93,15 @@ idle notification, bridge/fallback-hook exclusion, and child-state cleanup.
 
 ## Not yet implemented
 
-- Gemini update, login, package, and live testing. This remains deliberately
-  last and must pause for founder authentication.
-- Opt-in live doctor automation, packaged-wheel template resources, final
-  rollback acceptance, and clean-install matrix.
+- Antigravity CLI live model acceptance and a supported already-idle external
+  wake edge. Plugin validation and isolated install/reinstall/uninstall pass on
+  `agy 1.1.1`; lifecycle catch-up is implemented.
+- Opt-in live doctor automation, final rollback acceptance, and an automated
+  clean-install matrix.
+- Durable panel-completion notification and machine-readable adapter
+  capability reporting.
+
+See `ROADMAP.md` for priorities, optional candidates, and deliberate non-goals.
 
 The legacy inboxes remain the recovery channel. Never place the same actionable
 request in AgentPost and a legacy inbox; use legacy only for installation

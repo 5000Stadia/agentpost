@@ -33,6 +33,8 @@ def agent_presence(office: PostOffice, agent: str) -> Presence:
         return _codex_presence(adapter)
     if profile.cli == "python":
         return _python_presence(adapter)
+    if profile.cli == "antigravity":
+        return _antigravity_presence(adapter)
     return Presence("offline", f"no native presence probe for {profile.cli}")
 
 
@@ -107,6 +109,27 @@ def _python_presence(adapter) -> Presence:
     working = [item for item in live if item[0] == "working"]
     state, updated_at, pid = max(working or live, key=lambda item: item[1])
     return Presence(state, f"Python runtime pid {pid}", updated_at)
+
+
+def _antigravity_presence(adapter) -> Presence:
+    marker = adapter / "antigravity-hook.active"
+    try:
+        value = json.loads(marker.read_text(encoding="utf-8"))
+        updated_at = float(value["updated_at"])
+        state = str(value.get("state", "idle"))
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        return Presence(
+            "offline",
+            "Antigravity catch-up only; start or prompt the project session",
+        )
+    if updated_at < time.time() - 3.0:
+        return Presence(
+            "offline",
+            "Antigravity catch-up only; start or prompt the project session",
+            updated_at,
+        )
+    resolved = "working" if state == "working" else "idle"
+    return Presence(resolved, "Antigravity lifecycle hook", updated_at)
 
 
 def _pid_alive(pid: int) -> bool:

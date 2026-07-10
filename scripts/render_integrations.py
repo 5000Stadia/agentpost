@@ -24,6 +24,12 @@ TARGETS = (
     / "skills"
     / "agentpost"
     / "SKILL.md",
+    ROOT
+    / "integrations"
+    / "antigravity"
+    / "skills"
+    / "agentpost"
+    / "SKILL.md",
 )
 
 
@@ -32,7 +38,7 @@ def main() -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(SOURCE, target)
     bundle = {}
-    for cli in ("claude", "codex"):
+    for cli in ("antigravity", "claude", "codex"):
         root = ROOT / "integrations" / cli
         for path in sorted(root.rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts:

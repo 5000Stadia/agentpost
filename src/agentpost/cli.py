@@ -21,6 +21,8 @@ from .adapters import MailboxWatcher
 from .installer import armed, doctor, install, uninstall
 from .presence import agent_presence
 from .native import (
+    antigravity_hook,
+    antigravity_launch,
     claude_launch,
     claude_boundary,
     claude_monitor,
@@ -83,7 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     profile.add_argument(
         "--display-name", required=True, help="recognizable human-facing name"
     )
-    profile.add_argument("--cli", required=True, help="integration: claude, codex, or python")
+    profile.add_argument(
+        "--cli",
+        required=True,
+        help="integration: antigravity, claude, codex, or python",
+    )
     profile.add_argument(
         "--kind", required=True, help="descriptive kind: project, role, specialist, or hybrid"
     )
@@ -130,14 +136,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     connect = commands.add_parser("connect")
     connect.add_argument("agent", nargs="?")
-    connect.add_argument("--cli", choices=("claude", "codex", "python"))
+    connect.add_argument("--cli", choices=("antigravity", "claude", "codex", "python"))
     connect.add_argument("--project", type=Path, default=Path.cwd())
     join = commands.add_parser("join")
     join.add_argument("agent", nargs="?")
-    join.add_argument("--cli", choices=("claude", "codex", "python"))
+    join.add_argument("--cli", choices=("antigravity", "claude", "codex", "python"))
     join.add_argument("--project", type=Path, default=Path.cwd())
     disconnect = commands.add_parser("disconnect")
-    disconnect.add_argument("--cli", choices=("claude", "codex"), required=True)
+    disconnect.add_argument(
+        "--cli", choices=("antigravity", "claude", "codex"), required=True
+    )
     disconnect.add_argument("--project", type=Path, default=Path.cwd())
     commands.add_parser("bindings")
     status = commands.add_parser("status")
@@ -212,6 +220,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("internal-claude-monitor")
     native_codex = commands.add_parser("internal-codex-hook")
     native_codex.add_argument("event", choices=("session-start", "stop"))
+    native_antigravity = commands.add_parser("internal-antigravity-hook")
+    native_antigravity.add_argument("event", choices=("pre-invocation", "stop"))
     native_snapshot = commands.add_parser("internal-snapshot")
     native_snapshot.add_argument("agent")
     codex = commands.add_parser("codex")
@@ -220,16 +230,21 @@ def build_parser() -> argparse.ArgumentParser:
     claude = commands.add_parser("claude")
     claude.add_argument("--agent", required=True)
     claude.add_argument("claude_args", nargs=argparse.REMAINDER)
+    antigravity = commands.add_parser("antigravity")
+    antigravity.add_argument("--agent", required=True)
+    antigravity.add_argument("antigravity_args", nargs=argparse.REMAINDER)
     install_command = commands.add_parser("install")
-    install_command.add_argument("cli", choices=("claude", "codex"))
+    install_command.add_argument("cli", choices=("antigravity", "claude", "codex"))
     install_command.add_argument("--agent", required=True)
     install_command.add_argument("--project", type=Path, required=True)
     doctor_command = commands.add_parser("doctor")
     doctor_command.add_argument("agent")
     doctor_command.add_argument("--project", type=Path, required=True)
-    doctor_command.add_argument("--cli", choices=("claude", "codex", "python"))
+    doctor_command.add_argument(
+        "--cli", choices=("antigravity", "claude", "codex", "python")
+    )
     uninstall_command = commands.add_parser("uninstall")
-    uninstall_command.add_argument("cli", choices=("claude", "codex"))
+    uninstall_command.add_argument("cli", choices=("antigravity", "claude", "codex"))
     uninstall_command.add_argument("--project", type=Path, required=True)
     armed_command = commands.add_parser("armed")
     armed_command.add_argument("agent")
@@ -487,6 +502,8 @@ def main(argv: list[str] | None = None) -> int:
             return claude_monitor()
         elif args.command == "internal-codex-hook":
             return codex_hook(args.event)
+        elif args.command == "internal-antigravity-hook":
+            return antigravity_hook(args.event)
         elif args.command == "internal-snapshot":
             return codex_snapshot(office, args.agent)
         elif args.command == "codex":
@@ -501,6 +518,13 @@ def main(argv: list[str] | None = None) -> int:
                 office,
                 Path.cwd(),
                 _launcher_args(args.claude_args),
+                agent=args.agent,
+            )
+        elif args.command == "antigravity":
+            return antigravity_launch(
+                office,
+                Path.cwd(),
+                _launcher_args(args.antigravity_args),
                 agent=args.agent,
             )
         elif args.command == "install":
@@ -658,10 +682,19 @@ def _join(
             "session-start hook; "
             f"`agentpost doctor {agent} --project {project} --cli claude` verifies recovery"
         )
-    else:
+    elif cli == "codex":
         print(
             f"NEXT\ttrust AgentPost hooks, then run "
             f"`agentpost codex --agent {agent}`"
+        )
+    else:
+        print(
+            "NEXT\trestart Antigravity CLI so it loads the AgentPost plugin, "
+            f"using `agentpost antigravity --agent {agent}` so shell commands "
+            "retain this mailbox identity; then send one prompt to trigger "
+            "exact unread catch-up; "
+            f"`agentpost doctor {agent} --project {project} --cli antigravity` "
+            "verifies installation. Already-idle external wake is not yet supported."
         )
     return 0
 

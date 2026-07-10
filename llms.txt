@@ -8,6 +8,7 @@ Primary documentation:
 - docs/INSTALL.md: install, doctor, recovery, uninstall
 - docs/PROTOCOL.md: file layout and message semantics
 - docs/MIGRATION.md: non-duplicating legacy migration
+- ROADMAP.md: active closeout, Antigravity plan, candidates, and non-goals
 - SPEC.md: detailed design and acceptance criteria
 
 Core rules:

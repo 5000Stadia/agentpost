@@ -54,6 +54,16 @@ def install(office: PostOffice, cli: str, agent: str, project: Path) -> None:
             cwd=project,
             allow_already=True,
         )
+    elif cli == "antigravity":
+        _run(
+            ["agy", "plugin", "validate", str(source)],
+            cwd=project,
+        )
+        _run(
+            ["agy", "plugin", "install", str(source)],
+            cwd=project,
+            allow_already=True,
+        )
     else:
         raise AgentPostError(f"unsupported installer: {cli}")
 
@@ -77,6 +87,12 @@ def uninstall(cli: str, project: Path) -> None:
     elif cli == "codex":
         _run(
             ["codex", "plugin", "remove", "agentpost@agentpost-local"],
+            cwd=project,
+            allow_missing=True,
+        )
+    elif cli == "antigravity":
+        _run(
+            ["agy", "plugin", "uninstall", "agentpost"],
             cwd=project,
             allow_missing=True,
         )
@@ -120,12 +136,20 @@ def doctor(
                 "embed agentpost.AgentRuntime and route notifications to the host scheduler",
             )
         )
+    elif profile.cli == "antigravity":
+        checks.extend(_doctor_antigravity(project))
     else:
         checks.append(Check("adapter", False, f"unsupported CLI: {profile.cli}"))
     return tuple(checks)
 
 
 def armed(office: PostOffice, agent: str) -> tuple[bool, str]:
+    profile = office.load_profile(agent)
+    if profile.cli == "antigravity":
+        return (
+            False,
+            "Antigravity lifecycle catch-up only; already-idle external wake unsupported",
+        )
     value = agent_presence(office, agent)
     return value.active, value.detail
 
@@ -165,6 +189,46 @@ def _doctor_codex() -> tuple[Check, ...]:
         Check("codex-plugin", plugin.get("enabled") is True, "enabled" if plugin else "not installed"),
         Check("codex-hook-trust", len(trusted) >= 2, f"{len(trusted)}/2 hook records trusted"),
         Check("codex-node", shutil.which("node") is not None, shutil.which("node") or "not found"),
+    )
+
+
+def _doctor_antigravity(project: Path) -> tuple[Check, ...]:
+    executable = shutil.which("agy")
+    if executable is None:
+        return (Check("antigravity-cli", False, "agy not found"),)
+    try:
+        version = subprocess.run(
+            ["agy", "--version"],
+            cwd=project,
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout.strip()
+        plugin_output = subprocess.run(
+            ["agy", "plugin", "list"],
+            cwd=project,
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout
+        plugins = json.loads(plugin_output)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        return (Check("antigravity-cli", False, str(exc)),)
+    installed = any(
+        item.get("name") == "agentpost" for item in plugins.get("imports", [])
+    )
+    return (
+        Check("antigravity-cli", True, version or executable),
+        Check(
+            "antigravity-plugin",
+            installed,
+            "installed" if installed else "not installed",
+        ),
+        Check(
+            "antigravity-capability",
+            True,
+            "lifecycle catch-up; already-idle external wake unsupported",
+        ),
     )
 
 

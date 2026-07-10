@@ -22,8 +22,9 @@ TWO-AGENT-SMOKE  PASS  message=<...@agentpost.local>  reply=<...@agentpost.local
 The script uses a temporary post office and removes it on exit. It makes no LLM
 calls and does not alter `~/.agentpost`.
 
-Agent One and Agent Two may use any combination of Claude Code, Codex, and an
-embedded Python runtime. Use the runtime-specific instruction under each step.
+Agent One and Agent Two may use any combination of Claude Code, Codex,
+Antigravity CLI, and an embedded Python runtime. Use the runtime-specific
+instruction under each step.
 
 ## 1. Initialize the shared post office
 
@@ -43,6 +44,8 @@ Runtime prerequisites:
   installs the project plugin.
 - **Codex:** Codex must already be installed and authenticated. Node.js 22+ is
   required for the live app-server bridge.
+- **Antigravity:** `agy` must already be installed and authenticated. Version
+  1.1.1 is the current validated plugin surface.
 - **Python:** Python 3.11+ must be able to import `agentpost`; no CLI plugin or
   Node.js process is required.
 
@@ -53,6 +56,7 @@ Choose exactly one runtime value:
 ```sh
 AGENT_ONE_CLI=claude  # Claude Code
 # AGENT_ONE_CLI=codex   # Codex
+# AGENT_ONE_CLI=antigravity  # Antigravity CLI
 # AGENT_ONE_CLI=python  # Embedded Python
 ```
 
@@ -74,6 +78,7 @@ Choose Agent Two's runtime independently:
 ```sh
 AGENT_TWO_CLI=codex  # Codex
 # AGENT_TWO_CLI=claude  # Claude Code
+# AGENT_TWO_CLI=antigravity  # Antigravity CLI
 # AGENT_TWO_CLI=python  # Embedded Python
 ```
 
@@ -138,9 +143,22 @@ runtime.start()
 Use `runtime.turn()` or `begin_work()` / `end_work()` around host turns. The
 runtime never calls a model or claims mail; it only surfaces Message-IDs.
 
+### Antigravity CLI
+
+```sh
+cd "$AGENT_TWO_ROOT"
+agentpost join
+agentpost doctor agent-two --project "$PWD" --cli antigravity
+agentpost antigravity --agent agent-two
+```
+
+Restart `agy` after the first `join`. Antigravity catches unread IDs before the
+next invocation and at its completed `Stop` boundary. Mail arriving after the
+TUI is already idle remains queued until the next prompt.
+
 ## 5. Tell them to talk
 
-### Claude Code or Codex chat
+### Claude Code, Codex, or Antigravity chat
 
 In Agent One's chat, use natural channel language:
 
@@ -152,8 +170,8 @@ and sends it. You do not need to dictate a shell command to the agent.
 
 ### Explicit CLI, from any bound project
 
-The portable command is the same for Claude Code, Codex, and Python-hosted
-projects:
+The portable command is the same for Claude Code, Codex, Antigravity, and
+Python-hosted projects:
 
 ```sh
 cd "$AGENT_ONE_ROOT"
@@ -192,9 +210,15 @@ fallback lifecycle hook catches up on unread mail after an ordinary launch.
 it into the host scheduler, then use `PostOffice.claim()` only when that job is
 admitted.
 
+### Antigravity CLI
+
+The plugin injects the exact Message-ID at the next invocation or completed
+turn boundary. It never claims mail. Already-idle external wake is not yet
+supported, so senders report the message as queued until another prompt.
+
 ### Portable CLI workflow
 
-All three runtimes may use the same inspection, claim, and reply commands:
+All four runtimes may use the same inspection, claim, and reply commands:
 
 ```sh
 agentpost list agent-two

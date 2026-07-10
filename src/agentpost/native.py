@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import select
@@ -139,6 +140,48 @@ def codex_snapshot(office: PostOffice, agent: str) -> int:
     return 0
 
 
+def antigravity_hook(event_name: str) -> int:
+    if event_name not in {"pre-invocation", "stop"}:
+        raise ValueError(f"invalid Antigravity hook event: {event_name}")
+    event = json.load(sys.stdin)
+    office = PostOffice(_runtime_root())
+    profile = _antigravity_profile(office, event)
+    if profile is None:
+        print(_antigravity_empty_output(event_name))
+        return 0
+
+    fully_idle = event_name == "stop" and bool(event.get("fullyIdle", True))
+    state = "idle" if fully_idle else "working"
+    _atomic_json(
+        _antigravity_presence_marker(office, profile.name),
+        {
+            "conversation_id": str(event.get("conversationId", "")),
+            "updated_at": time.time(),
+            "state": state,
+        },
+    )
+    if event_name == "stop" and not fully_idle:
+        print(json.dumps({"decision": "stop"}))
+        return 0
+
+    unread = office.list_messages(profile.name, "unread")
+    ledger_path = _antigravity_ledger(office, profile.name, event)
+    notified = _antigravity_notified(ledger_path)
+    pending = [record for record in unread if record.letter.message_id not in notified]
+    if not pending:
+        print(_antigravity_empty_output(event_name))
+        return 0
+
+    notified.update(record.letter.message_id for record in pending)
+    _atomic_json(ledger_path, {"notified": sorted(notified)})
+    instruction = _antigravity_instruction(profile.name, pending)
+    if event_name == "pre-invocation":
+        print(json.dumps({"injectSteps": [{"ephemeralMessage": instruction}]}))
+    else:
+        print(json.dumps({"decision": "continue", "reason": instruction}))
+    return 0
+
+
 def codex_launch(
     office: PostOffice,
     cwd: Path,
@@ -227,6 +270,22 @@ def claude_launch(
         raise AgentPostError("Claude CLI not found") from exc
 
 
+def antigravity_launch(
+    office: PostOffice,
+    cwd: Path,
+    antigravity_args: list[str],
+    *,
+    agent: str,
+) -> int:
+    profile = identify_agent(office, cwd, cli="antigravity", agent=agent)
+    environment = os.environ.copy()
+    environment["AGENTPOST_AGENT"] = profile.name
+    try:
+        return subprocess.call(["agy", *antigravity_args], cwd=cwd, env=environment)
+    except FileNotFoundError as exc:
+        raise AgentPostError("Antigravity CLI not found") from exc
+
+
 def _codex_remote_command(url: str, args: list[str]) -> list[str]:
     if args and args[0] in {"resume", "fork"}:
         return ["codex", args[0], "--remote", url, *args[1:]]
@@ -235,6 +294,60 @@ def _codex_remote_command(url: str, args: list[str]) -> list[str]:
 
 def _codex_bridge_marker(office: PostOffice, agent: str) -> Path:
     return office.root / "agents" / agent / "adapter" / "codex-bridge.active"
+
+
+def _antigravity_profile(office: PostOffice, event: dict):
+    override = os.environ.get("AGENTPOST_AGENT")
+    workspaces = event.get("workspacePaths") or [Path.cwd()]
+    ordered = sorted(
+        (Path(item) for item in workspaces),
+        key=lambda item: len(item.parts),
+        reverse=True,
+    )
+    for workspace in ordered:
+        try:
+            return identify_agent(
+                office,
+                workspace,
+                cli="antigravity",
+                agent=override,
+            )
+        except (AgentPostError, OSError, ValueError):
+            continue
+    return None
+
+
+def _antigravity_ledger(office: PostOffice, agent: str, event: dict) -> Path:
+    conversation = str(event.get("conversationId", "unknown"))
+    token = hashlib.sha256(conversation.encode("utf-8")).hexdigest()[:20]
+    return office.root / "agents" / agent / "adapter" / f"antigravity-{token}.json"
+
+
+def _antigravity_notified(path: Path) -> set[str]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return {str(item) for item in value.get("notified", [])}
+    except (OSError, TypeError, AttributeError, json.JSONDecodeError):
+        return set()
+
+
+def _antigravity_presence_marker(office: PostOffice, agent: str) -> Path:
+    return office.root / "agents" / agent / "adapter" / "antigravity-hook.active"
+
+
+def _antigravity_empty_output(event_name: str) -> str:
+    if event_name == "pre-invocation":
+        return json.dumps({"injectSteps": []})
+    return json.dumps({"decision": "stop"})
+
+
+def _antigravity_instruction(agent: str, records: list) -> str:
+    pointers = ", ".join(record.letter.message_id for record in records)
+    return (
+        f"AgentPost has {len(records)} unread message(s) for {agent}: {pointers}. "
+        "Use the agentpost skill. Inspect exactly these IDs, claim each only when "
+        "starting its work, reply by Message-ID, and give the user a short synopsis."
+    )
 
 
 def _free_loopback_port() -> int:

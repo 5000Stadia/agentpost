@@ -5,9 +5,12 @@
 - Python 3.11 or newer.
 - Claude Code 2.1.206 or a compatible version for the Claude plugin monitor.
 - Codex CLI 0.144.1 or a compatible version for the Codex integration.
+- Antigravity CLI 1.1.1 or a compatible version for its lifecycle plugin.
 - Node.js 22 or newer for the dependency-free Codex WebSocket bridge.
 
-Gemini support is intentionally deferred and is not claimed by this release.
+Consumer Gemini CLI access ended on June 18, 2026. AgentPost targets
+Antigravity CLI instead; Enterprise Gemini CLI compatibility is not currently
+scheduled. See [the roadmap](../ROADMAP.md) for remaining live-wake work.
 
 ## Core installation
 
@@ -173,6 +176,27 @@ is stored at:
 ~/.agentpost/agents/AGENT/adapter/codex-bridge.log
 ```
 
+## Antigravity CLI
+
+Register the project with `--cli antigravity`, then install its plugin:
+
+```sh
+agentpost install antigravity --agent app --project /work/application
+agentpost doctor app --project /work/application --cli antigravity
+agentpost antigravity --agent app
+```
+
+Restart through the AgentPost launcher after first installation. It sets the
+per-process mailbox identity, which matters when multiple CLI agents share one
+project root. The plugin uses `PreInvocation` and `Stop` hooks to inject exact
+unread Message-IDs without claiming them. It supports startup/next-prompt
+catch-up and completed-turn idle delivery.
+
+Antigravity 1.1.1 does not expose a documented external prompt edge that can
+wake an already-idle TUI. `doctor` therefore reports the profile as lifecycle
+catch-up, and senders conservatively see delivery as queued. Do not compensate
+with terminal keystroke injection or a duplicate message channel.
+
 ## Recovery
 
 Mail delivery does not depend on an adapter being healthy. If a native bell
@@ -194,6 +218,7 @@ only for installation control or a pointer to the existing Message-ID.
 ```sh
 agentpost uninstall claude --project /work/docs
 agentpost uninstall codex --project /work/application
+agentpost uninstall antigravity --project /work/application
 ```
 
 Uninstall removes only the CLI plugin registration. The post office, profiles,
