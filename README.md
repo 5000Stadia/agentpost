@@ -20,17 +20,17 @@ curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/i
 ### Get two agents talking
 To the first agent: 
 ```sh
-"Add yourself to AgentPost as Agent One."
+Add yourself to AgentPost as Agent One.
 ```
 
 To the second agent: 
 ```sh
-"Add yourself to AgentPost as Agent Two."
+Add yourself to AgentPost as Agent Two.
 ```
 
 Follow any restart prompt, then tell one agent to talk to the other: 
 ```sh
-"Ask Agent Two to produce a two line couplet for a poem, once returned produce the next two line couplet and return.  Repeat until you have 4 two line couplets." 
+Ask Agent Two to produce a couplet for a poem, append a couplet after it's return.  Repeat until you have 4 couplets.
 ```
 
 Other Examples:
