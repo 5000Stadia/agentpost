@@ -18,7 +18,7 @@ let pollRunning = false;
 socket.addEventListener("open", async () => {
   try {
     await request("initialize", {
-      clientInfo: { name: "agentpost", title: "AgentPost", version: "0.0.1" },
+      clientInfo: { name: "agentpost", title: "AgentPost", version: "0.0.6" },
       capabilities: {
         experimentalApi: true,
         requestAttestation: false,
@@ -231,7 +231,7 @@ function parseArgs(args) {
   for (let index = 0; index < args.length; index += 2) {
     parsed[args[index].replace(/^--/, "")] = args[index + 1];
   }
-  for (const key of ["url", "agent", "root", "cwd", "log", "presence", "ownerPid"]) {
+  for (const key of ["url", "agent", "root", "cwd", "log", "presence", "ownerPid", "instanceId"]) {
     if (!parsed[key]) throw new Error(`missing --${key}`);
   }
   return parsed;
@@ -245,6 +245,8 @@ function writePresence(state) {
       pid: Number(options.ownerPid),
       updated_at: Date.now() / 1000,
       state,
+      instance_id: options.instanceId,
+      adapter: "codex",
     }),
   );
   renameSync(temporary, options.presence);

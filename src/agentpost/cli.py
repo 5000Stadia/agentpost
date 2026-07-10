@@ -49,6 +49,11 @@ Avoid: "Helpful coding agent working on the current task."
 
 Keep the nameplate stable. Do not include current task/status, availability,
 generic personality claims, unverified aspirations, or secrets.
+
+Example:
+  agentpost profile-register reviewer --display-name 'Code Review' --kind role
+    --summary 'Reviews implementation correctness and regression risk.'
+    --roles 'code review' --specialties 'correctness,regression analysis'
 """
 
 
@@ -71,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = commands.add_parser("init")
     init.add_argument("--connection-mode", choices=("auto", "manual"))
+    commands.add_parser("migrate")
 
     profile = commands.add_parser(
         "profile-register",
@@ -87,8 +93,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     profile.add_argument(
         "--cli",
-        required=True,
-        help="integration: antigravity, claude, codex, or python",
+        help=(
+            "optional first-connection hint: antigravity, claude, codex, or python; "
+            "the mailbox itself is CLI-neutral"
+        ),
     )
     profile.add_argument(
         "--kind", required=True, help="descriptive kind: project, role, specialist, or hybrid"
@@ -99,9 +107,13 @@ def build_parser() -> argparse.ArgumentParser:
     profile.add_argument("--organization", help="optional stable organization or team")
     profile.add_argument("--roles", default="", help="comma-separated workplace functions")
     profile.add_argument("--projects", default="", help="comma-separated project names or aliases")
-    profile.add_argument("--project-roots", default="", help="comma-separated absolute project roots")
+    profile.add_argument(
+        "--project-roots", default="", help="comma-separated absolute project roots"
+    )
     profile.add_argument("--specialties", default="", help="comma-separated reusable expertise")
-    profile.add_argument("--handles", default="", help="comma-separated concrete request categories")
+    profile.add_argument(
+        "--handles", default="", help="comma-separated concrete request categories"
+    )
     profile.add_argument(
         "--does-not-handle",
         default="",
@@ -209,9 +221,12 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--once", action="store_true")
 
     reply = commands.add_parser("reply")
-    reply.add_argument("agent")
-    reply.add_argument("message_id")
-    reply.add_argument("body", nargs="?")
+    reply.add_argument(
+        "parts",
+        nargs="*",
+        help="MESSAGE_ID [BODY], or legacy AGENT MESSAGE_ID [BODY]",
+    )
+    reply.add_argument("--from", dest="sender")
     reply.add_argument("--notify", choices=("idle", "immediate"), default="immediate")
 
     native_claude_boundary = commands.add_parser("internal-claude-boundary")
@@ -258,6 +273,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "init":
             print(office.initialize(_init_connection_mode(office, args.connection_mode)))
+        elif args.command == "migrate":
+            actions = office.migrate()
+            for action in actions:
+                print(f"MIGRATED\t{action}")
+            if not actions:
+                print("CURRENT\tno metadata migration needed")
         elif args.command == "profile-register":
             profile = Profile(
                 name=args.name,
@@ -281,8 +302,9 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 if args.offline and presence.active:
                     continue
+                adapters = _profile_adapters(office, profile.name, profile.cli)
                 print(
-                    f"{profile.name}\t{presence.state}\t{profile.cli}\t"
+                    f"{profile.name}\t{presence.state}\t{','.join(adapters) or '-'}\t"
                     f"{profile.kind}\t{profile.summary}"
                 )
         elif args.command == "agents-find":
@@ -301,6 +323,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"\t{evidence}"
                 )
         elif args.command == "identities":
+            print("type\taddress\tattention\tdisplay\tprojects\thandles\tsummary")
             for profile in office.list_profiles():
                 presence = agent_presence(office, profile.name)
                 print(
@@ -487,11 +510,12 @@ def main(argv: list[str] | None = None) -> int:
                     flush=True,
                 )
         elif args.command == "reply":
-            recipient = office.read(args.agent, args.message_id).letter.from_agent
+            replier, message_id, body = _reply_parts(office, args.parts, args.sender)
+            recipient = office.read(replier, message_id).letter.from_agent
             result = office.reply(
-                args.agent,
-                args.message_id,
-                _channel_body(args.body),
+                replier,
+                message_id,
+                _channel_body(body),
                 notify=args.notify,
             )
             print(result.message_id)
@@ -552,7 +576,7 @@ def _parse_args(
     parser: argparse.ArgumentParser, argv: list[str] | None
 ) -> argparse.Namespace:
     args, extras = parser.parse_known_args(argv)
-    supports_optional_body = args.command in {"message", "question", "reply"}
+    supports_optional_body = args.command in {"message", "question"}
     if (
         supports_optional_body
         and args.body is None
@@ -560,6 +584,13 @@ def _parse_args(
         and (extras[0] == "-" or not extras[0].startswith("-"))
     ):
         args.body = extras[0]
+        return args
+    if (
+        args.command == "reply"
+        and len(extras) == 1
+        and (extras[0] == "-" or not extras[0].startswith("-"))
+    ):
+        args.parts.append(extras[0])
         return args
     if extras:
         parser.error(f"unrecognized arguments: {' '.join(extras)}")
@@ -599,6 +630,24 @@ def _channel_body(value: str | None) -> str:
     if not body:
         raise ValueError("message body must not be empty")
     return body
+
+
+def _reply_parts(
+    office: PostOffice, parts: list[str], requested_sender: str | None
+) -> tuple[str, str, str | None]:
+    if not parts:
+        raise ValueError("reply requires MESSAGE_ID")
+    known = {profile.name for profile in office.list_profiles()}
+    if parts[0] in known:
+        if requested_sender is not None:
+            raise ValueError("do not combine legacy AGENT reply syntax with --from")
+        if len(parts) not in {2, 3}:
+            raise ValueError("legacy reply syntax is AGENT MESSAGE_ID [BODY]")
+        return parts[0], parts[1], parts[2] if len(parts) == 3 else None
+    if len(parts) not in {1, 2}:
+        raise ValueError("reply syntax is MESSAGE_ID [BODY]")
+    sender = _channel_sender(office, requested_sender)
+    return sender, parts[0], parts[1] if len(parts) == 2 else None
 
 
 def _print_resolution(office: PostOffice, label: str) -> None:
@@ -673,7 +722,7 @@ def _join(
     project = project.expanduser().resolve()
     agent = requested_agent or _infer_join_agent(office, project, requested_cli)
     profile = office.load_profile(agent)
-    cli = requested_cli or profile.cli
+    cli = _join_cli(office, agent, project, requested_cli, profile.cli)
     if cli == "python":
         office.bind_agent(agent, cli, project)
     else:
@@ -726,16 +775,15 @@ def _infer_join_agent(
     if len(candidates) == 1:
         return candidates[0].name
     if candidates:
-        choices = ", ".join(
-            f"{profile.name} ({profile.cli})" for profile in candidates
-        )
+        choices = ", ".join(profile.name for profile in candidates)
         raise ValueError(
             f"multiple mailbox profiles match {project}: {choices}; "
             "run `agentpost join NAME`"
         )
-    available = ", ".join(
-        f"{profile.name} ({profile.cli})" for profile in office.list_profiles()
-    ) or "none registered"
+    available = (
+        ", ".join(profile.name for profile in office.list_profiles())
+        or "none registered"
+    )
     raise ValueError(
         f"no mailbox profile root matches {project}; candidates: {available}; "
         "run `agentpost join NAME`"
@@ -750,6 +798,59 @@ def _warn_unarmed(office: PostOffice, recipients) -> None:
                 f"agentpost: delivered to {recipient}; notifier not armed: {detail}",
                 file=sys.stderr,
             )
+
+
+def _join_cli(
+    office: PostOffice,
+    agent: str,
+    project: Path,
+    requested: str | None,
+    hint: str | None,
+) -> str:
+    if requested is not None:
+        return requested
+    exact = {
+        binding.cli
+        for binding in office.list_bindings()
+        if binding.agent == agent and Path(binding.project) == project
+    }
+    if len(exact) == 1:
+        return exact.pop()
+    if hint is not None:
+        return hint
+    detected = _detect_cli()
+    if detected is not None:
+        return detected
+    if exact:
+        raise ValueError(
+            f"multiple adapters already connect {agent} at {project}; pass --cli"
+        )
+    raise ValueError(
+        "cannot infer this process's CLI; pass --cli antigravity, claude, codex, or python"
+    )
+
+
+def _detect_cli() -> str | None:
+    if os.environ.get("AGENTPOST_CLI"):
+        return os.environ["AGENTPOST_CLI"]
+    if os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_CI"):
+        return "codex"
+    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
+        return "claude"
+    if os.environ.get("ANTIGRAVITY_CLI") or os.environ.get("AGY_SESSION_ID"):
+        return "antigravity"
+    return None
+
+
+def _profile_adapters(
+    office: PostOffice, agent: str, hint: str | None = None
+) -> tuple[str, ...]:
+    values = {
+        binding.cli for binding in office.list_bindings() if binding.agent == agent
+    }
+    if hint:
+        values.add(hint)
+    return tuple(sorted(values))
 
 
 if __name__ == "__main__":

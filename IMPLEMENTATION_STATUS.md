@@ -41,9 +41,11 @@ or the original data directories.
 - Antigravity CLI 1.1.1 plugin, install/doctor/uninstall path, non-claiming
   PreInvocation catch-up, and Stop-boundary delivery with honest degraded
   already-idle wake reporting.
-- Live adapter heartbeats/ownership, `agentpost armed`, and sender-side
+- Live adapter heartbeats, mailbox-wide cross-adapter consumer leases,
+  diagnostic runtime-instance ownership, `agentpost armed`, and sender-side
   catch-up-only warnings after durable delivery.
-- Durable `(CLI, project root)` bindings, automatic known-project reconnect,
+- CLI-neutral profile v2 identities, machine-local workspace defaults and
+  known alternates, legacy adapter bindings, automatic known-project reconnect,
   manual binding mode, and per-process mailbox overrides for shared projects.
 - Derived `offline`/`idle`/`working` presence, active-only responsibility
   discovery, offline profile views, and durable exact-name offline delivery.
@@ -51,7 +53,7 @@ or the original data directories.
   bare-root-resolving idempotent `join`, `disconnect`, `bindings`, `status`, and explicit
   Claude/Codex launchers.
 - CLI-neutral `AgentRuntime` for Python agent systems: token-free watcher
-  thread, single-owner heartbeat, working/idle boundaries, callback/queue
+  thread, standby takeover, owner-only heartbeat, working/idle boundaries, callback/queue
   delivery, ordered callback retry with visible exhaustion, async consumption,
   unread reconciliation, and non-claiming restart catch-up.
 - Human-facing channel addressing with an inspectable identity directory,
@@ -79,7 +81,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 84 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 92 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 

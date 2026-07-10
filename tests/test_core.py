@@ -101,6 +101,45 @@ class PostOfficeTest(unittest.TestCase):
         self.assertTrue(delivered.recipient_path.exists())
         self.assertEqual(self.office.list_bindings()[0].project, str(second.resolve()))
 
+    def test_mailbox_can_bind_multiple_cli_adapters_and_keeps_one_workspace_default(self) -> None:
+        project = Path(self.temp.name) / "shared"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        self.office.bind_agent("k", "claude", project)
+        marker = self.office.workspace_identity(project / "src")
+        self.assertEqual(marker[0], "cx")
+        self.assertEqual(marker[1], ("cx", "k"))
+        self.assertEqual(marker[2], project)
+
+    def test_workspace_marker_is_excluded_from_git_when_bound(self) -> None:
+        project = Path(self.temp.name) / "repository"
+        (project / ".git" / "info").mkdir(parents=True)
+        self.office.bind_agent("cx", "codex", project)
+        self.assertTrue((project / ".agentpost.toml").is_file())
+        self.assertIn(
+            ".agentpost.toml",
+            (project / ".git" / "info" / "exclude").read_text(encoding="utf-8"),
+        )
+
+    def test_migrate_upgrades_v1_profile_and_materializes_legacy_binding_marker(self) -> None:
+        project = Path(self.temp.name) / "legacy"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        (project / ".agentpost.toml").unlink()
+        profile_path = self.root / "agents" / "cx" / "profile.toml"
+        legacy = profile_path.read_text(encoding="utf-8").replace(
+            "version = 2", "version = 1", 1
+        ).replace("cli_hint =", "cli =", 1)
+        profile_path.write_text(legacy, encoding="utf-8")
+
+        actions = self.office.migrate()
+
+        self.assertEqual(self.office.load_profile("cx").version, 2)
+        self.assertEqual(self.office.load_profile("cx").cli, "codex")
+        self.assertEqual(self.office.workspace_identity(project)[0], "cx")
+        self.assertTrue(any("profile cx" in action for action in actions))
+        self.assertTrue(any("default cx" in action for action in actions))
+
     def test_connection_mode_round_trips_without_losing_groups(self) -> None:
         self.office.set_group("team", ("cx", "k"))
         self.office.set_connection_mode("manual")

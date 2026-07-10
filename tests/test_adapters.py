@@ -6,6 +6,7 @@ import time
 import unittest
 import json
 import os
+import subprocess
 from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch
@@ -32,6 +33,7 @@ from agentpost.native import (  # noqa: E402
 )
 from agentpost.installer import _integration_source, armed, doctor, install  # noqa: E402
 from agentpost.presence import agent_presence  # noqa: E402
+from agentpost.ownership import ConsumerLease  # noqa: E402
 
 
 def profile(name: str) -> Profile:
@@ -70,6 +72,42 @@ class AdapterTest(unittest.TestCase):
             bell.notifications,
             [("k", result.message_id, "immediate")],
         )
+
+    def test_consumer_lease_is_shared_across_adapter_types(self) -> None:
+        office = self.office()
+        claude = ConsumerLease(office, "k", "claude")
+        python = ConsumerLease(office, "k", "python")
+        self.assertTrue(claude.acquire())
+        self.assertFalse(python.acquire())
+        self.assertEqual(python.current_owner()["adapter"], "claude")
+        claude.release()
+        self.assertTrue(python.acquire())
+        python.release()
+
+    def test_consumer_lease_excludes_a_separate_process(self) -> None:
+        office = self.office()
+        owner = ConsumerLease(office, "k", "claude")
+        self.assertTrue(owner.acquire())
+        source = Path(__file__).parents[1] / "src"
+        script = """
+from agentpost import PostOffice
+from agentpost.ownership import ConsumerLease
+import sys
+lease = ConsumerLease(PostOffice(sys.argv[1]), "k", "codex")
+print("acquired" if lease.acquire() else "blocked")
+lease.release()
+"""
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script, str(self.root)],
+                env={**os.environ, "PYTHONPATH": str(source)},
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+        finally:
+            owner.release()
+        self.assertEqual(result.stdout.strip(), "blocked")
 
     def test_notification_failure_does_not_undo_delivery(self) -> None:
         class BrokenBell:

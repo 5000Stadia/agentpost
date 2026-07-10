@@ -37,8 +37,8 @@ agentpost init
 
 Interactive `init` asks for a connection policy:
 
-- `auto` (recommended): reconnect an unqualified CLI to a known mailbox by its
-  registered project root;
+- `auto` (recommended): reconnect an unqualified CLI through its workspace
+  marker, binding, or registered project root;
 - `manual`: require a binding created with `agentpost join` or `connect`.
 
 Use `--connection-mode auto` or `--connection-mode manual` for unattended
@@ -57,7 +57,7 @@ hybrid identities need to claim project ownership in their profile.
 
 ```sh
 agentpost profile-register app \
-  --display-name App --cli codex --kind project \
+  --display-name App --kind project \
   --summary 'Application engineering' \
   --roles engineering --projects application \
   --project-roots /work/application \
@@ -99,13 +99,13 @@ agentpost agents-find 'temporal provenance' --all
 agentpost profile-register --help
 ```
 
-For the usual first connection, change to the project and run one command. It
-infers the CLI from the profile, records the binding, and installs the native
-integration:
+For the usual first connection, change to the project and run one command. The
+agent supplies its current CLI, records the adapter binding and CLI-neutral
+workspace identity, and installs the native integration:
 
 ```sh
 cd /work/application
-agentpost join
+agentpost join --cli codex
 ```
 
 That makes onboarding two short steps: the owner declares the profile once;
@@ -116,12 +116,12 @@ restart or hook-trust instruction.
 `join` is idempotent: it handles fresh installation and an existing integration.
 The explicit form also handles a moved checkout, where the new root cannot yet
 identify itself. `connect` is an alias for users who prefer that verb, so the
-agent never diagnoses installation state. Both assign the mailbox as the
-default for one CLI and project root. Reopening that CLI at the same location
-reconnects to the same mailbox:
+agent never diagnoses installation state. Both create one machine-local
+workspace default in `.agentpost.toml` and a separate adapter binding.
+Reopening any installed CLI at that location resolves the same default mailbox:
 
 ```sh
-agentpost connect --project /work/application
+agentpost connect app --cli codex --project /work/application
 agentpost identify --cli codex --cwd /work/application
 ```
 
@@ -129,18 +129,30 @@ Moving a project is a new binding, not a mailbox migration. Connect the new
 path, verify it, then remove the old default:
 
 ```sh
-agentpost connect app --project /work/application-v2
+agentpost connect app --cli codex --project /work/application-v2
 agentpost disconnect --cli codex --project /work/application
 ```
 
-There is one default per `(CLI, project root)`. Multiple agents may still work
-from the same directory by selecting a mailbox per process:
+There is one unqualified default per workspace. Multiple agents and multiple
+adapter types may still work from the same directory by selecting a mailbox per
+process:
 
 ```sh
 agentpost codex --agent app
 agentpost codex --agent reviewer
 agentpost claude --agent docs
 ```
+
+Resolution uses explicit `--agent`/`AGENTPOST_AGENT` first. Otherwise the
+deepest workspace marker, legacy adapter binding, or declared project root
+wins, in that priority order for equal paths. `known_agents` in the workspace
+marker records valid alternates but never guesses among them.
+
+Only one inbound consumer may own a mailbox across all adapter types. Python
+runtimes and Claude monitors wait as standbys; Codex and Antigravity launchers
+report the existing owner when a second live bridge cannot attach safely. Start
+separate role or reviewer sessions with separate mailbox names when both must
+process inbound work concurrently.
 
 When child arguments begin with an option, separate them from AgentPost's own
 options: `agentpost claude --agent docs -- --model opus`.
@@ -192,7 +204,7 @@ is stored at:
 
 ## Antigravity CLI
 
-Register the project with `--cli antigravity`, then install its plugin:
+Register a CLI-neutral project profile, then connect its Antigravity adapter:
 
 ```sh
 agentpost install antigravity --agent app --project /work/application

@@ -128,11 +128,12 @@ def doctor(
             Check("project", project.is_dir(), str(project)),
         )
     )
-    if profile.cli == "claude":
+    adapter_cli = _resolve_adapter_cli(office, profile.name, project, cli, profile.cli)
+    if adapter_cli == "claude":
         checks.extend(_doctor_claude(project))
-    elif profile.cli == "codex":
+    elif adapter_cli == "codex":
         checks.extend(_doctor_codex())
-    elif profile.cli == "python":
+    elif adapter_cli == "python":
         checks.append(
             Check(
                 "python-api",
@@ -140,22 +141,43 @@ def doctor(
                 "embed agentpost.AgentRuntime and route notifications to the host scheduler",
             )
         )
-    elif profile.cli == "antigravity":
+    elif adapter_cli == "antigravity":
         checks.extend(_doctor_antigravity(project))
     else:
-        checks.append(Check("adapter", False, f"unsupported CLI: {profile.cli}"))
+        checks.append(Check("adapter", False, f"unsupported CLI: {adapter_cli}"))
     return tuple(checks)
 
 
 def armed(office: PostOffice, agent: str) -> tuple[bool, str]:
-    profile = office.load_profile(agent)
-    if profile.cli == "antigravity":
-        return (
-            False,
-            "Antigravity lifecycle catch-up only; already-idle external wake unsupported",
-        )
     value = agent_presence(office, agent)
-    return value.active and value.healthy, value.detail
+    return value.active and value.healthy and value.wake_capable, value.detail
+
+
+def _resolve_adapter_cli(
+    office: PostOffice,
+    agent: str,
+    project: Path,
+    requested: str | None,
+    hint: str | None,
+) -> str:
+    if requested is not None:
+        return requested
+    matches = {
+        binding.cli
+        for binding in office.list_bindings()
+        if binding.agent == agent and Path(binding.project) == project
+    }
+    if len(matches) == 1:
+        return matches.pop()
+    if hint is not None:
+        return hint
+    if matches:
+        raise AgentPostError(
+            f"multiple adapters are connected for {agent} at {project}; pass --cli"
+        )
+    raise AgentPostError(
+        f"no adapter is connected for {agent} at {project}; pass --cli"
+    )
 
 
 def _doctor_claude(project: Path) -> tuple[Check, ...]:

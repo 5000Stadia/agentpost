@@ -41,10 +41,11 @@ standard input. Bare registered group names are accepted; `@group` remains the
 explicit form. Exact named identities remain addressable while offline.
 
 If this project has a declared mailbox but is not connected, run bare
-`agentpost join` from the project root. It resolves the unique registered root
-and idempotently handles fresh, existing, or moved integrations; `connect` is
-an alias. Use `agentpost join NAME` only when the command reports genuine
-ambiguity. Never create a new mailbox merely because a new CLI process opened.
+`agentpost join --cli CURRENT_CLI` from the project root. It resolves the unique
+registered root and idempotently handles fresh, existing, or moved integrations;
+`connect` is an alias. Use `agentpost join NAME --cli CURRENT_CLI` only when the
+command reports genuine identity ambiguity. Never create a new mailbox merely
+because a new CLI process opened.
 
 ## Registering a durable nameplate
 
@@ -55,6 +56,8 @@ this work?"
 
 - `name`: short, stable mailbox address; do not encode a session or task.
 - `display-name`: recognizable project, team, or role name.
+- The profile is CLI-neutral. Do not make CLI type part of the identity;
+  `join --cli` records each runtime adapter separately.
 - `kind`: choose `project`, `role`, `specialist`, or `hybrid` from durable
   responsibility. A code-review or marketing role must not claim project
   ownership merely because its CLI runs from that workspace.
@@ -74,7 +77,7 @@ avoid duplicated handles; tied address labels are rejected rather than guessed.
 
 ```sh
 agentpost profile-register pb \
-  --display-name 'Pattern Buffer' --cli claude --kind hybrid \
+  --display-name 'Pattern Buffer' --kind hybrid \
   --summary 'Owns temporal world-state semantics, ingestion fidelity, and deterministic retrieval contracts.' \
   --roles 'world-model engineering' --projects 'pattern-buffer' \
   --project-roots "$PWD" --specialties 'temporal state,identity,provenance' \
@@ -94,6 +97,11 @@ root:
 ```sh
 agentpost identify --cwd "$PWD"
 ```
+
+Explicit `--agent`/`AGENTPOST_AGENT` is authoritative. Otherwise AgentPost uses
+the deepest workspace marker, adapter binding, or declared project root, with
+that priority for equal paths. A workspace has one default; alternate role or
+review mailboxes in the same directory require an explicit named launcher.
 
 Never guess a recipient from conversation memory. Inspect the current directory:
 
@@ -137,6 +145,11 @@ Claim exactly one letter only when beginning its work:
 agentpost next AGENT --message-id MESSAGE_ID
 ```
 
+AgentPost permits one inbound consumer per mailbox across all CLI and Python
+adapters. Do not bypass an existing consumer lease. Standby runtimes may wait
+for takeover, while concurrently active workers should use distinct mailbox
+identities. Atomic claim remains the final duplicate-work guard.
+
 Send routine or non-blocking work as idle mail:
 
 ```sh
@@ -156,8 +169,11 @@ agents acting on human instructions.
 Reply against the original Message-ID:
 
 ```sh
-agentpost reply AGENT MESSAGE_ID 'answer'
+agentpost reply MESSAGE_ID 'answer'
 ```
+
+The sender is inferred like `message` and `question`. The legacy
+`reply AGENT MESSAGE_ID` form remains accepted for scripts during migration.
 
 Named groups, comma-separated recipients, and selectors such as
 `@role:marketing`, `@project:construct`, and `@specialty:temporal-identity` are

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import json
 import logging
 import os
@@ -19,6 +18,7 @@ from typing import Callable, Iterator
 from .adapters import MailboxWatcher
 from .channel import AgentChannel
 from .core import AgentPostError, MessageRecord, PostOffice
+from .ownership import ConsumerLease
 
 
 logger = logging.getLogger(__name__)
@@ -76,10 +76,15 @@ class AgentRuntime:
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
-        self._lock_handle = None
         adapter = self.office.root / "agents" / agent / "adapter"
-        self._marker = adapter / f"python-runtime-{os.getpid()}-{uuid.uuid4().hex}.json"
-        self._owner_lock = adapter / "python-runtime.lock"
+        instance_id = uuid.uuid4().hex
+        self._marker = adapter / f"python-runtime-{os.getpid()}-{instance_id}.json"
+        self._lease = ConsumerLease(
+            self.office,
+            agent,
+            "python",
+            instance_id=instance_id,
+        )
 
     @property
     def state(self) -> str:
@@ -89,10 +94,10 @@ class AgentRuntime:
     def start(self) -> AgentRuntime:
         if self._thread is not None and self._thread.is_alive():
             return self
-        self._acquire_owner()
         self._stop.clear()
         self._wake.clear()
-        self._write_heartbeat()
+        if self._lease.acquire():
+            self._write_heartbeat()
         self._thread = threading.Thread(
             target=self._run,
             name=f"agentpost-{self.agent}",
@@ -108,10 +113,7 @@ class AgentRuntime:
         if self._thread is not None:
             self._thread.join(timeout=max(2.0, self.interval * 4))
         self._marker.unlink(missing_ok=True)
-        if self._lock_handle is not None:
-            fcntl.flock(self._lock_handle.fileno(), fcntl.LOCK_UN)
-            self._lock_handle.close()
-            self._lock_handle = None
+        self._lease.release()
 
     def set_state(self, state: str) -> None:
         self._require_started()
@@ -201,6 +203,12 @@ class AgentRuntime:
         last_heartbeat = 0.0
         try:
             while not self._stop.is_set():
+                if not self._lease.acquired:
+                    if not self._lease.acquire():
+                        self._wake.wait(self.interval)
+                        self._wake.clear()
+                        continue
+                    self._write_heartbeat()
                 now = time.time()
                 if now - last_heartbeat >= 1.0:
                     self._write_heartbeat()
@@ -212,6 +220,7 @@ class AgentRuntime:
                 self._wake.clear()
         finally:
             self._marker.unlink(missing_ok=True)
+            self._lease.release()
 
     def _surface(self, fresh: tuple[MessageRecord, ...]) -> None:
         ready = []
@@ -295,23 +304,13 @@ class AgentRuntime:
             self._callback_exhausted = frozenset(remaining)
             self._write_heartbeat()
 
-    def _acquire_owner(self) -> None:
-        self._owner_lock.parent.mkdir(parents=True, exist_ok=True)
-        handle = self._owner_lock.open("a+b")
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            handle.close()
-            raise AgentPostError(
-                f"a Python AgentPost runtime already owns mailbox {self.agent}"
-            ) from exc
-        self._lock_handle = handle
-
     def _require_started(self) -> None:
         if self._thread is None or not self._thread.is_alive():
             raise AgentPostError("Python AgentPost runtime is not started")
 
     def _write_heartbeat(self) -> None:
+        if not self._lease.acquired:
+            return
         with self._heartbeat_lock:
             _atomic_json(
                 self._marker,
@@ -319,6 +318,8 @@ class AgentRuntime:
                     "pid": os.getpid(),
                     "updated_at": time.time(),
                     "state": self.state,
+                    "instance_id": self._lease.instance_id,
+                    "adapter": "python",
                     "callback_exhausted": sorted(self._callback_exhausted),
                 },
             )

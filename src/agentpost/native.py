@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .adapters import MailboxWatcher
 from .core import AgentPostError, PostOffice
+from .ownership import ConsumerLease
 from .routing import identify_agent
 
 
@@ -47,17 +48,34 @@ def claude_monitor() -> int:
         agent=os.environ.get("AGENTPOST_AGENT"),
     )
     watcher = MailboxWatcher(office, profile.name, interval=0.2)
-    marker = office.root / "agents" / profile.name / "adapter" / f"claude-monitor-{os.getpid()}.json"
+    lease = ConsumerLease(office, profile.name, "claude")
+    marker = (
+        office.root
+        / "agents"
+        / profile.name
+        / "adapter"
+        / f"claude-monitor-{os.getpid()}-{lease.instance_id}.json"
+    )
     deferred = []
     last_heartbeat = 0.0
     try:
         while True:
+            if not lease.acquired:
+                if not lease.acquire():
+                    time.sleep(watcher.interval)
+                    continue
             now = time.time()
             state = _claude_boundary_state()
             if now - last_heartbeat >= 1.0:
                 _atomic_json(
                     marker,
-                    {"pid": os.getpid(), "updated_at": now, "state": state},
+                    {
+                        "pid": os.getpid(),
+                        "updated_at": now,
+                        "state": state,
+                        "instance_id": lease.instance_id,
+                        "adapter": "claude",
+                    },
                 )
                 last_heartbeat = now
             for record in watcher.pending():
@@ -72,6 +90,7 @@ def claude_monitor() -> int:
             time.sleep(watcher.interval)
     finally:
         marker.unlink(missing_ok=True)
+        lease.release()
 
 
 def codex_hook(event_name: str) -> int:
@@ -92,36 +111,43 @@ def codex_hook(event_name: str) -> int:
     except (AgentPostError, OSError, ValueError):
         print("{}")
         return 0
-    if _codex_bridge_marker(office, profile.name).exists():
+    lease = ConsumerLease(office, profile.name, "codex-hook")
+    if not lease.acquire():
         print("{}")
         return 0
-    unread = office.list_messages(profile.name, "unread")
-    if not unread:
-        print("{}")
-        return 0
-    pointers = ", ".join(record.letter.message_id for record in unread)
-    instruction = (
-        f"AgentPost has {len(unread)} unread message(s) for {profile.name}: "
-        f"{pointers}. Inspect with agentpost list/read, claim each only when "
-        "starting it, process the work, reply by Message-ID, and give the user "
-        "a short synopsis."
-    )
-    if event_name == "session-start":
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "SessionStart",
-                        "additionalContext": instruction,
-                    }
-                }
-            )
+    try:
+        if _codex_bridge_marker(office, profile.name).exists():
+            print("{}")
+            return 0
+        unread = office.list_messages(profile.name, "unread")
+        if not unread:
+            print("{}")
+            return 0
+        pointers = ", ".join(record.letter.message_id for record in unread)
+        instruction = (
+            f"AgentPost has {len(unread)} unread message(s) for {profile.name}: "
+            f"{pointers}. Inspect with agentpost list/read, claim each only when "
+            "starting it, process the work, reply by Message-ID, and give the user "
+            "a short synopsis."
         )
-    elif not event.get("stop_hook_active", False):
-        print(json.dumps({"decision": "block", "reason": instruction}))
-    else:
-        print("{}")
-    return 0
+        if event_name == "session-start":
+            print(
+                json.dumps(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": "SessionStart",
+                            "additionalContext": instruction,
+                        }
+                    }
+                )
+            )
+        elif not event.get("stop_hook_active", False):
+            print(json.dumps({"decision": "block", "reason": instruction}))
+        else:
+            print("{}")
+        return 0
+    finally:
+        lease.release()
 
 
 def codex_snapshot(office: PostOffice, agent: str) -> int:
@@ -150,36 +176,57 @@ def antigravity_hook(event_name: str) -> int:
         print(_antigravity_empty_output(event_name))
         return 0
 
-    fully_idle = event_name == "stop" and bool(event.get("fullyIdle", True))
-    state = "idle" if fully_idle else "working"
-    _atomic_json(
-        _antigravity_presence_marker(office, profile.name),
-        {
-            "conversation_id": str(event.get("conversationId", "")),
-            "updated_at": time.time(),
-            "state": state,
-        },
+    inherited_instance = os.environ.get("AGENTPOST_CONSUMER_INSTANCE")
+    lease = ConsumerLease(
+        office,
+        profile.name,
+        "antigravity-hook",
+        instance_id=inherited_instance,
     )
-    if event_name == "stop" and not fully_idle:
-        print(json.dumps({"decision": "stop"}))
-        return 0
-
-    unread = office.list_messages(profile.name, "unread")
-    ledger_path = _antigravity_ledger(office, profile.name, event)
-    notified = _antigravity_notified(ledger_path)
-    pending = [record for record in unread if record.letter.message_id not in notified]
-    if not pending:
+    owner = lease.current_owner()
+    inherited = bool(
+        inherited_instance and owner.get("instance_id") == inherited_instance
+    )
+    if not inherited and not lease.acquire():
         print(_antigravity_empty_output(event_name))
         return 0
 
-    notified.update(record.letter.message_id for record in pending)
-    _atomic_json(ledger_path, {"notified": sorted(notified)})
-    instruction = _antigravity_instruction(profile.name, pending)
-    if event_name == "pre-invocation":
-        print(json.dumps({"injectSteps": [{"ephemeralMessage": instruction}]}))
-    else:
-        print(json.dumps({"decision": "continue", "reason": instruction}))
-    return 0
+    try:
+        fully_idle = event_name == "stop" and bool(event.get("fullyIdle", True))
+        state = "idle" if fully_idle else "working"
+        _atomic_json(
+            _antigravity_presence_marker(office, profile.name),
+            {
+                "conversation_id": str(event.get("conversationId", "")),
+                "updated_at": time.time(),
+                "state": state,
+                "instance_id": inherited_instance or lease.instance_id,
+                "adapter": "antigravity",
+            },
+        )
+        if event_name == "stop" and not fully_idle:
+            print(json.dumps({"decision": "stop"}))
+            return 0
+
+        unread = office.list_messages(profile.name, "unread")
+        ledger_path = _antigravity_ledger(office, profile.name, event)
+        notified = _antigravity_notified(ledger_path)
+        pending = [record for record in unread if record.letter.message_id not in notified]
+        if not pending:
+            print(_antigravity_empty_output(event_name))
+            return 0
+
+        notified.update(record.letter.message_id for record in pending)
+        _atomic_json(ledger_path, {"notified": sorted(notified)})
+        instruction = _antigravity_instruction(profile.name, pending)
+        if event_name == "pre-invocation":
+            print(json.dumps({"injectSteps": [{"ephemeralMessage": instruction}]}))
+        else:
+            print(json.dumps({"decision": "continue", "reason": instruction}))
+        return 0
+    finally:
+        if not inherited:
+            lease.release()
 
 
 def codex_launch(
@@ -195,23 +242,32 @@ def codex_launch(
         cli="codex",
         agent=agent or os.environ.get("AGENTPOST_AGENT"),
     )
+    lease = ConsumerLease(office, profile.name, "codex", cwd=cwd)
+    lease.require()
     marker = _codex_bridge_marker(office, profile.name)
     marker.parent.mkdir(parents=True, exist_ok=True)
     _atomic_json(
         marker,
-        {"pid": os.getpid(), "updated_at": time.time(), "state": "idle"},
+        {
+            "pid": os.getpid(),
+            "updated_at": time.time(),
+            "state": "idle",
+            "instance_id": lease.instance_id,
+            "adapter": "codex",
+        },
     )
     port = _free_loopback_port()
     url = f"ws://127.0.0.1:{port}"
-    server = subprocess.Popen(
-        ["codex", "app-server", "--listen", url],
-        cwd=cwd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    server = None
     bridge = None
     try:
+        server = subprocess.Popen(
+            ["codex", "app-server", "--listen", url],
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
         _wait_for_app_server(server, port)
         bridge_script = files("agentpost").joinpath("data/codex_bridge.mjs")
         bridge = subprocess.Popen(
@@ -234,6 +290,8 @@ def codex_launch(
                 os.fspath(marker),
                 "--owner-pid",
                 str(os.getpid()),
+                "--instance-id",
+                lease.instance_id,
             ],
             cwd=cwd,
         )
@@ -250,8 +308,10 @@ def codex_launch(
     finally:
         if bridge is not None:
             _terminate(bridge)
-        _terminate(server)
+        if server is not None:
+            _terminate(server)
         marker.unlink(missing_ok=True)
+        lease.release()
 
 
 def claude_launch(
@@ -278,12 +338,17 @@ def antigravity_launch(
     agent: str,
 ) -> int:
     profile = identify_agent(office, cwd, cli="antigravity", agent=agent)
+    lease = ConsumerLease(office, profile.name, "antigravity", cwd=cwd)
+    lease.require()
     environment = os.environ.copy()
     environment["AGENTPOST_AGENT"] = profile.name
+    environment["AGENTPOST_CONSUMER_INSTANCE"] = lease.instance_id
     try:
         return subprocess.call(["agy", *antigravity_args], cwd=cwd, env=environment)
     except FileNotFoundError as exc:
         raise AgentPostError("Antigravity CLI not found") from exc
+    finally:
+        lease.release()
 
 
 def _codex_remote_command(url: str, args: list[str]) -> list[str]:

@@ -9,6 +9,28 @@ from .core import PostOffice, Profile, UnknownAgentError
 from .presence import agent_presence
 
 
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "in",
+    "is",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
+}
+
+
 @dataclass(frozen=True)
 class AgentMatch:
     profile: Profile
@@ -235,15 +257,15 @@ def identify_agent(
     agent: str | None = None,
 ) -> Profile:
     if agent is not None:
-        profile = office.load_profile(agent)
-        if cli is not None and profile.cli != cli:
-            raise ValueError(
-                f"mailbox {agent} is registered for {profile.cli}, not {cli}"
-            )
-        return profile
+        return office.load_profile(agent)
 
     current = Path(cwd).expanduser().resolve()
     candidates = []
+    workspace = office.workspace_identity(current)
+    if workspace is not None:
+        candidates.append(
+            (len(workspace[2].parts), 2, office.load_profile(workspace[0]))
+        )
     for binding in office.list_bindings():
         if cli is not None and binding.cli != cli:
             continue
@@ -255,8 +277,6 @@ def identify_agent(
 
     if office.connection_mode() == "auto":
         for profile in office.list_profiles():
-            if cli is not None and profile.cli != cli:
-                continue
             for root_value in profile.project_roots:
                 root = Path(root_value).expanduser().resolve()
                 if current == root or root in current.parents:
@@ -293,21 +313,29 @@ def project_candidates(
     """Profiles whose declared roots contain cwd, restricted to the deepest root."""
     current = Path(cwd).expanduser().resolve()
     candidates = []
+    workspace = office.workspace_identity(current)
+    if workspace is not None:
+        candidates.append(
+            (len(workspace[2].parts), 1, office.load_profile(workspace[0]))
+        )
     for profile in office.list_profiles():
-        if cli is not None and profile.cli != cli:
-            continue
         for root_value in profile.project_roots:
             root = Path(root_value).expanduser().resolve()
             if current == root or root in current.parents:
-                candidates.append((len(root.parts), profile))
+                candidates.append((len(root.parts), 0, profile))
                 break
     if not candidates:
         return ()
-    best_depth = max(depth for depth, _ in candidates)
+    best_depth = max(depth for depth, _, _ in candidates)
+    best_priority = max(
+        priority for depth, priority, _ in candidates if depth == best_depth
+    )
     return tuple(
         profile
-        for depth, profile in sorted(candidates, key=lambda item: item[1].name)
-        if depth == best_depth
+        for depth, priority, profile in sorted(
+            candidates, key=lambda item: item[2].name
+        )
+        if depth == best_depth and priority == best_priority
     )
 
 
@@ -354,5 +382,7 @@ def _normalize(value: str) -> str:
 def _tokens(values: Iterable[str]) -> set[str]:
     tokens = set()
     for value in values:
-        tokens.update(_normalize(value).split())
+        tokens.update(
+            token for token in _normalize(value).split() if token not in _STOPWORDS
+        )
     return tokens

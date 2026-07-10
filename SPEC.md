@@ -184,10 +184,9 @@ these profile files.
 Example:
 
 ~~~toml
-version = 1
+version = 2
 name = "pb"
 display_name = "Pattern Buffer"
-cli = "claude"
 kind = "hybrid"
 organization = "local-agent-company"
 summary = """
@@ -318,18 +317,31 @@ than selecting a recipient by guesswork.
 
 A mailbox belongs to a durable agent identity, not to a CLI process. Creating a
 new process must not automatically create a new durable mailbox. Declaration is
-explicit through `profile-register`; connection attaches a process or project
-default to an existing mailbox.
+explicit through `profile-register`; connection attaches one or more CLI or
+Python adapters to the existing mailbox. Profile schema v2 is CLI-neutral. A
+legacy `cli_hint` may assist first connection but never constrains ownership.
 
 On first initialization the user chooses:
 
 - `auto`: known project roots may reconnect to registered profiles;
 - `manual`: only explicit bindings or per-process agent overrides resolve.
 
-Both modes reuse explicit `(CLI, project root) -> agent` bindings. There is one
-default per CLI/project pair. A per-process `AGENTPOST_AGENT`/launcher override
-allows multiple differently named agents to share one project without making
-the default ambiguous.
+Both modes reuse explicit adapter bindings and machine-local workspace markers.
+`join` writes `.agentpost.toml` with one `default_agent` plus non-default
+`known_agents`, excluding it through `.git/info/exclude` when possible. Identity
+resolution first honors `AGENTPOST_AGENT`/`--agent`, then chooses the deepest
+workspace marker, adapter binding, or declared project root. At equal depth the
+marker wins over a binding, and a binding wins over a declared root. Ties fail
+instead of guessing. Explicit launchers allow multiple differently named agents
+to share one project.
+
+Every inbound adapter competes for one mailbox-wide POSIX `flock`. The owner
+record names a generated runtime instance UUID, adapter, PID, cwd, and
+acquisition time. Python and monitor adapters may remain token-free standbys and
+take over after release. Adapters that cannot attach their notification bridge
+after startup reject a second owner. Atomic per-message claim remains the final
+duplicate-work defense; the system does not promise exactly-once execution
+after a process crashes with already-claimed work.
 
 Adapter heartbeats derive `offline`, `idle`, and `working`. Offline profiles are
 hidden from ordinary availability searches and dynamic responsibility
@@ -337,17 +349,17 @@ selectors, but their mailbox and archives remain intact. Exact-name and named
 group delivery to an offline mailbox is legal and queues durably. Returning at
 the bound project root makes that same box active again.
 
-The common onboarding command is bare, idempotent `agentpost join`. It resolves
-the unique deepest profile root without asking a fresh agent to know its own
-mailbox name. `connect` is an alias; an explicit name is required only for a
-real ambiguity. Python agent systems use the same lifecycle with `cli=python`
-and embed `AgentRuntime`, which surfaces Message-IDs to the host scheduler
-without calling a model or claiming mail.
+The common onboarding command is idempotent `agentpost join --cli CURRENT_CLI`.
+It resolves the unique deepest profile root without asking a fresh agent to know
+its own mailbox name. `connect` is an alias; an explicit name is required only
+for a real identity ambiguity. Python agent systems use the same lifecycle with
+`--cli python` and embed `AgentRuntime`, which surfaces Message-IDs to the host
+scheduler without calling a model or claiming mail.
 
 Registration commands:
 
 ~~~text
-agentpost profile-register <agent> --display-name ... --cli ... --kind ...
+agentpost profile-register <agent> --display-name ... --kind ...
   --summary ... --roles ... --projects ... --project-roots ...
   --specialties ... --handles ...
 agentpost profiles --all
@@ -910,7 +922,7 @@ agentpost ask <sender> <canonical-recipient|list|@group> <text>
 agentpost list <agent> [--state unread|read|sent|all]
 agentpost read <agent> <message-id>
 agentpost next <agent> [--message-id id]
-agentpost reply <agent> <message-id> <text>
+agentpost reply <message-id> <text> [--from agent]
 agentpost panel <originator> <message-id>
 agentpost watch <agent>
 ~~~

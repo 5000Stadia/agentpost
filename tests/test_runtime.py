@@ -197,14 +197,22 @@ class PythonRuntimeTest(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_one_python_runtime_owns_a_mailbox(self) -> None:
+    def test_second_runtime_stands_by_and_takes_over_without_duplicate_surface(self) -> None:
         first = AgentRuntime("app", root=self.root, interval=0.01).start()
+        second = AgentRuntime("app", root=self.root, interval=0.01).start()
         try:
-            second = AgentRuntime("app", root=self.root, interval=0.01)
-            with self.assertRaises(AgentPostError):
-                second.start()
+            initial = self.office.send("cx", "app", "only the owner sees this")
+            self.assertEqual(first.get(timeout=1)[0].message_id, initial.message_id)
+            with self.assertRaises(queue.Empty):
+                second.get(timeout=0.05)
+            self.office.claim("app", initial.message_id)
+            first.close()
+
+            takeover = self.office.send("cx", "app", "standby takes over")
+            self.assertEqual(second.get(timeout=1)[0].message_id, takeover.message_id)
         finally:
             first.close()
+            second.close()
 
     def test_nested_turns_remain_working_until_all_complete(self) -> None:
         with AgentRuntime("app", root=self.root, interval=0.01) as runtime:

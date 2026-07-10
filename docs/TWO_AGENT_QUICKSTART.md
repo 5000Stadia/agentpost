@@ -64,7 +64,7 @@ Then register the durable identity:
 
 ```sh
 agentpost profile-register agent-one \
-  --display-name 'Agent One' --cli "$AGENT_ONE_CLI" --kind project \
+  --display-name 'Agent One' --kind project \
   --summary 'Owns planning and turns requirements into implementation briefs.' \
   --projects agent-one-project --project-roots "$AGENT_ONE_ROOT" \
   --specialties 'planning,requirements' \
@@ -84,7 +84,7 @@ AGENT_TWO_CLI=codex  # Codex
 
 ```sh
 agentpost profile-register agent-two \
-  --display-name 'Agent Two' --cli "$AGENT_TWO_CLI" --kind role \
+  --display-name 'Agent Two' --kind role \
   --summary 'Provides cross-project implementation review and engineering risk analysis.' \
   --roles 'code review' \
   --specialties 'code review,engineering risk' \
@@ -92,21 +92,23 @@ agentpost profile-register agent-two \
 ```
 
 `profile-register` creates a durable mailbox identity. It does not create a new
-identity every time the corresponding process opens.
+identity every time the corresponding process opens, and it does not bind the
+mailbox to one CLI type.
 
 Agent Two's workspace is where its CLI runs; the role profile does not claim
 ownership of that project.
 
 ## 4. Connect each agent
 
-Project identities can use bare `join`. Role-only and specialist identities use
-`join NAME --cli RUNTIME` from whichever workspace hosts that session.
+Project identities can omit the name when their declared root is unique.
+Role-only and specialist identities name the mailbox. Both supply the runtime
+adapter on first connection.
 
 ### Claude Code
 
 ```sh
 cd "$AGENT_ONE_ROOT"
-agentpost join
+agentpost join --cli claude
 agentpost doctor agent-one --project "$PWD" --cli claude
 ```
 
@@ -132,7 +134,7 @@ Codex launch retains lifecycle-hook catch-up but not the full live bridge.
 
 ```sh
 cd "$AGENT_ONE_ROOT"
-agentpost join
+agentpost join --cli python
 agentpost doctor agent-one --project "$PWD" --cli python
 ```
 
@@ -228,7 +230,7 @@ All four runtimes may use the same inspection, claim, and reply commands:
 ```sh
 agentpost list agent-two
 agentpost next agent-two --message-id '<message-id>'
-agentpost reply agent-two '<message-id>' \
+agentpost reply '<message-id>' \
   'The largest risk is retrying a partially committed write without an idempotency key.'
 ```
 

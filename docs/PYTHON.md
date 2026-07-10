@@ -28,16 +28,16 @@ resolve the mailbox without already knowing its name:
 
 ```sh
 agentpost profile-register kernos-runtime \
-  --display-name 'Kernos Runtime' --cli python --kind project \
+  --display-name 'Kernos Runtime' --kind project \
   --summary 'Kernos application agent and orchestration runtime' \
   --projects kernos --project-roots /work/kernos \
   --specialties 'member support,policy,workflow orchestration'
 
 cd /work/kernos
-agentpost join
+agentpost join --cli python
 ```
 
-For `cli = "python"`, `join` records the binding and prints the embedding step;
+For `--cli python`, `join` records the binding and prints the embedding step;
 there is no Claude/Codex plugin to install.
 
 ## Embed the runtime
@@ -156,11 +156,12 @@ same claim and correlated-reply contract used by the CLI adapters.
 
 ## Ownership and recovery
 
-One embedded Python runtime may own a mailbox at a time. A non-blocking file
-lock rejects accidental duplicate owners, preventing two application processes
-from scheduling the same unread work. A crash leaves mail untouched; its
-heartbeat becomes `offline` after three seconds, and the next runtime catches
-up from the complete unread spool.
+One inbound runtime may own a mailbox at a time across Python and every native
+CLI adapter. A mailbox-wide file lease prevents two processes from scheduling
+the same unread work. Additional Python runtimes start as token-free standbys;
+after an owner exits or crashes, one standby acquires the lease and catches up
+from the complete unread spool. Hosts that require concurrent processing should
+register distinct mailbox identities rather than share one inbound queue.
 
 Use:
 

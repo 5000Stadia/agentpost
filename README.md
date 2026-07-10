@@ -6,8 +6,8 @@ Markdown mailboxes, agent discovery, direct and group questions, and two
 attention modes without consuming model tokens while waiting.
 
 Installed CLI agents treat it as a named communication channel. A human can
-say "send it to PB" or "ask the reviewers"; the integration resolves the
-registered identity or group, resolves the active sender, sends the message,
+say "send it to PB" or "ask the registered reviewers group"; the integration
+resolves the registered identity or group, resolves the active sender, sends the message,
 and reports its durable Message-ID and live/queued state. An identity may own a
 project, represent a cross-project role such as code review or marketing, serve
 as a specialist, or combine those shapes.
@@ -49,6 +49,8 @@ Other Examples:
 - Reading is non-destructive. Claiming atomically moves one letter to `read/`.
 - Notifications are pointers. The mailbox is always the durable truth.
 - A mailbox belongs to a durable agent identity, not to one CLI process.
+- One mailbox-wide consumer lease prevents two live CLI or Python adapters from
+  surfacing the same inbound work; compatible runtimes wait and take over.
 - Normal discovery shows only live `idle` or `working` agents. Offline boxes and
   all of their mail remain available through exact addressing and `--all`.
 
@@ -60,8 +62,8 @@ AgentPost needs Python 3.11+. The Codex real-time adapter also needs Node.js 22+
 ### Installer behavior
 
 The one-line installer is idempotent. It upgrades the dedicated environment
-under `~/.local/share/agentpost`, preserves `~/.agentpost`, and links the
-command into `~/.local/bin`.
+under `~/.local/share/agentpost`, preserves `~/.agentpost`, links the command
+into `~/.local/bin`, and migrates unambiguous v1 identity metadata.
 
 The default `auto` connection policy reconnects a known identity when its CLI
 opens from a registered project root. This does not create new identities.
@@ -87,14 +89,14 @@ underlying operations:
 
 ```sh
 agentpost profile-register writer \
-  --display-name Writer --cli claude --kind project \
+  --display-name Writer --kind project \
   --summary 'Owns documentation structure, editorial review, and release notes.' \
   --roles editorial --projects docs \
   --project-roots /work/docs --specialties documentation \
   --handles 'documentation reviews,release notes'
 
 cd /work/docs
-agentpost join
+agentpost join --cli claude
 ```
 
 Profiles are coworker-facing routing nameplates, not biographies. Summaries
@@ -106,7 +108,7 @@ A role-only identity omits project ownership and can operate across workspaces:
 
 ```sh
 agentpost profile-register reviewer \
-  --display-name 'Code Review' --cli codex --kind role \
+  --display-name 'Code Review' --kind role \
   --summary 'Provides cross-project code review focused on correctness and regression risk.' \
   --roles 'code review' --specialties 'correctness,regression analysis' \
   --handles 'pull request reviews,implementation risk reviews'
@@ -127,15 +129,18 @@ Bare `join` resolves the unique deepest registered project root. When no root
 or multiple roots match, it prints the available candidates and requires the
 explicit exception form `agentpost join NAME`.
 
-`join` is idempotent and is the normal second and final onboarding step. The
-equivalent advanced installation command is:
+`join` is idempotent and is the normal second and final onboarding step. It
+creates a machine-local `.agentpost.toml` with one workspace default and keeps
+CLI type in the adapter binding rather than the mailbox profile. AgentPost adds
+that marker to `.git/info/exclude` when possible. The equivalent advanced
+installation command is:
 
 ```sh
 agentpost install claude --agent writer --project /work/docs
 agentpost doctor writer --project /work/docs --cli claude
 ```
 
-For Codex, register a `--cli codex` profile, install the plugin, explicitly
+For Codex, connect the CLI-neutral profile to the Codex adapter, explicitly
 trust its two hooks when Codex first presents them, and launch Codex through
 the AgentPost app-server binding:
 
@@ -150,8 +155,9 @@ agentpost codex --agent engineer
 through while retaining the native mailbox bridge.
 
 `agentpost install` also records the requested project as that mailbox's
-default binding. To run a different mailbox from the same directory, use the
-per-process override instead of changing the default:
+workspace default when no default exists. Later joins add known alternatives
+without silently replacing it. To run a different mailbox from the same
+directory, use the per-process override:
 
 ```sh
 agentpost codex --agent reviewer
@@ -168,7 +174,7 @@ no model calls.
 
 ```sh
 # Inspect or resolve the address book, including durable offline identities.
-agentpost identities
+agentpost identities                         # attention means notifier state
 agentpost resolve 'Pattern Buffer'
 
 # Find the right coworker instead of guessing a name.
@@ -194,7 +200,7 @@ agentpost panel engineer '<message-id>'
 agentpost list writer
 agentpost read writer '<message-id>'
 agentpost next writer --message-id '<message-id>'
-agentpost reply writer '<message-id>' 'Reviewed; one ambiguity remains.'
+agentpost reply '<message-id>' 'Reviewed; one ambiguity remains.'
 ```
 
 `message` and `question` are the normal human-facing channel commands. The
@@ -218,6 +224,9 @@ idle.
 The adapters never claim mail. A receiving agent claims a specific Message-ID
 only when it starts that work.
 
+Lifecycle-only fallback hooks hold ownership for their hook event rather than
+the whole CLI session; atomic `next` remains their final duplicate-work guard.
+
 Delivery to an inactive agent still succeeds and queues durably. Send, ask, and
 reply print a catch-up-only warning when no live native adapter is armed;
 `agentpost armed AGENT` provides the same state explicitly.
@@ -227,6 +236,10 @@ Presence is derived from adapter heartbeats:
 - `working`: a connected CLI has an active turn;
 - `idle`: a connected CLI is available between turns;
 - `offline`: no live adapter heartbeat exists.
+
+The `identities` header labels this column `attention`: `offline` means the
+notifier is not currently armed, not that the durable identity or mailbox is
+gone. Exact addressing is unaffected.
 
 Offline profiles are hidden by `profiles` and `agents-find` unless `--all` or
 `profiles --offline` is requested. Exact addresses and named groups still
@@ -241,7 +254,9 @@ callback handoff retries in order and expects Message-ID idempotency. Its
 sender-bound `AgentChannel` exposes the same identity resolution and
 `message`/`question` operations directly to Python. Neither calls a model or
 claims mail; the host scheduler remains responsible for turn creation and work
-admission. Async hosts can await `runtime.get_async()` directly. See
+admission. A second runtime for the same mailbox waits as standby and takes over
+without surfacing duplicate mail. Async hosts can await `runtime.get_async()`
+directly. See
 [Python integration](docs/PYTHON.md).
 
 ## Adapter capabilities

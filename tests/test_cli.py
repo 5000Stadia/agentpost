@@ -74,7 +74,7 @@ class JoinCommandTest(unittest.TestCase):
                 project_roots=(str(self.project),),
             )
         )
-        with self.assertRaisesRegex(ValueError, r"app \(python\).*reviewer \(python\)"):
+        with self.assertRaisesRegex(ValueError, r"app.*reviewer"):
             _infer_join_agent(self.office, self.project, None)
 
     def test_message_is_a_sender_inferred_named_channel(self) -> None:
@@ -117,6 +117,24 @@ class JoinCommandTest(unittest.TestCase):
         self.assertEqual(reply.body, body)
         self.assertEqual(reply.in_reply_to, request.message_id)
 
+    def test_reply_infers_sender_from_workspace_identity(self) -> None:
+        request = self.office.send("pb", "app", "Please review this.")
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "reply",
+                        request.message_id,
+                        "Inferred sender response.",
+                    ]
+                )
+        self.assertEqual(result, 0)
+        reply = self.office.list_messages("pb")[0].letter
+        self.assertEqual(reply.from_agent, "app")
+        self.assertEqual(reply.in_reply_to, request.message_id)
+
     def test_optional_channel_bodies_may_follow_flags(self) -> None:
         request = self.office.send("pb", "app", "Please reply.")
         commands = (
@@ -153,6 +171,7 @@ class JoinCommandTest(unittest.TestCase):
             "agent\tpb\toffline\tPattern Buffer\tpattern-buffer\t",
             identities.getvalue(),
         )
+        self.assertTrue(identities.getvalue().startswith("type\taddress\tattention"))
 
         resolved = StringIO()
         with redirect_stdout(resolved):
@@ -171,6 +190,7 @@ class JoinCommandTest(unittest.TestCase):
         self.assertIn("what this agent owns", help_text)
         self.assertIn("Two to five concrete request categories", help_text)
         self.assertIn("Do not include current task/status", help_text)
+        self.assertIn("profile-register reviewer", help_text)
 
     def test_profile_registration_records_organization_and_boundaries(self) -> None:
         with redirect_stdout(StringIO()):

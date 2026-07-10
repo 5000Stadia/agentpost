@@ -8,7 +8,7 @@ import time
 import tomllib
 import uuid
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from email.header import Header
 from email.parser import BytesParser
@@ -57,10 +57,10 @@ class Experience:
 class Profile:
     name: str
     display_name: str
-    cli: str
     kind: str
     summary: str
-    version: int = 1
+    cli: str | None = None
+    version: int = 2
     organization: str | None = None
     roles: tuple[str, ...] = ()
     projects: tuple[str, ...] = ()
@@ -74,7 +74,6 @@ class Profile:
         _validate_agent_name(self.name)
         for label, value in (
             ("display_name", self.display_name),
-            ("cli", self.cli),
             ("kind", self.kind),
             ("summary", self.summary),
         ):
@@ -250,6 +249,33 @@ class PostOffice:
         _atomic_write(path, _config_to_toml(groups, mode).encode("utf-8"))
         return path
 
+    def migrate(self) -> tuple[str, ...]:
+        """Upgrade durable metadata without guessing ambiguous workspace defaults."""
+        self.initialize()
+        actions = []
+        for profile in self.list_profiles():
+            if profile.version < 2:
+                self.register_profile(replace(profile, version=2))
+                actions.append(f"profile {profile.name}: v{profile.version} -> v2")
+
+        by_project: dict[Path, set[str]] = {}
+        for binding in self.list_bindings():
+            project = Path(binding.project)
+            by_project.setdefault(project, set()).add(binding.agent)
+        for project, agents in sorted(by_project.items(), key=lambda item: str(item[0])):
+            if not project.is_dir() or (project / ".agentpost.toml").exists():
+                continue
+            if len(agents) != 1:
+                actions.append(
+                    f"workspace {project}: skipped ambiguous defaults "
+                    f"{', '.join(sorted(agents))}"
+                )
+                continue
+            agent = next(iter(agents))
+            self._record_workspace_identity(agent, project)
+            actions.append(f"workspace {project}: default {agent}")
+        return tuple(actions)
+
     def register_profile(self, profile: Profile) -> Path:
         profile.validate()
         self.initialize()
@@ -276,12 +302,12 @@ class PostOffice:
             for item in data.get("experience", ())
         )
         profile = Profile(
-            version=data["version"],
+            version=int(data.get("version", 1)),
             name=data["name"],
             display_name=data["display_name"],
-            cli=data["cli"],
             kind=data["kind"],
             summary=data["summary"],
+            cli=data.get("cli_hint", data.get("cli")),
             organization=data.get("organization"),
             roles=tuple(data.get("roles", ())),
             projects=tuple(data.get("projects", ())),
@@ -303,17 +329,17 @@ class PostOffice:
         return tuple(profiles)
 
     def bind_agent(self, name: str, cli: str, project: str | Path) -> Path:
-        profile = self.load_profile(name)
-        if profile.cli != cli:
-            raise ValueError(
-                f"mailbox {name} is registered for {profile.cli}, not {cli}"
-            )
+        self.load_profile(name)
+        if not cli.strip():
+            raise ValueError("cli must not be empty")
         current = Path(project).expanduser().resolve()
         self.initialize()
         token = hashlib.sha256(f"{cli}\0{current}".encode("utf-8")).hexdigest()
         path = self.bindings_dir / f"{token}.toml"
         binding = Binding(agent=name, cli=cli, project=str(current))
         _atomic_write(path, _binding_to_toml(binding).encode("utf-8"))
+        if current.is_dir():
+            self._record_workspace_identity(name, current)
         return path
 
     def list_bindings(self) -> tuple[Binding, ...]:
@@ -340,7 +366,88 @@ class PostOffice:
         path.unlink(missing_ok=True)
         if existed:
             _fsync_directory(path.parent)
+            remaining = tuple(
+                binding.agent
+                for binding in self.list_bindings()
+                if Path(binding.project) == current
+            )
+            self._rewrite_workspace_identity(current, remaining)
         return existed
+
+    def workspace_identity(
+        self, project: str | Path
+    ) -> tuple[str, tuple[str, ...], Path] | None:
+        """Return the nearest machine-local workspace default and known alternates."""
+        current = Path(project).expanduser().resolve()
+        for directory in (current, *current.parents):
+            marker = directory / ".agentpost.toml"
+            if not marker.is_file():
+                continue
+            try:
+                with marker.open("rb") as handle:
+                    data = tomllib.load(handle)
+                default_agent = str(data["default_agent"])
+                known = tuple(
+                    dict.fromkeys(
+                        (
+                            default_agent,
+                            *(str(item) for item in data.get("known_agents", ())),
+                        )
+                    )
+                )
+                for name in known:
+                    self.load_profile(name)
+            except (KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+                raise AgentPostError(f"invalid workspace identity marker: {marker}") from exc
+            return default_agent, known, directory
+        return None
+
+    def _record_workspace_identity(self, name: str, project: Path) -> None:
+        marker = project / ".agentpost.toml"
+        if marker.exists():
+            with marker.open("rb") as handle:
+                data = tomllib.load(handle)
+            default_agent = str(data.get("default_agent", name))
+            known = tuple(
+                dict.fromkeys(
+                    (
+                        default_agent,
+                        *(str(item) for item in data.get("known_agents", ())),
+                        name,
+                    )
+                )
+            )
+        else:
+            default_agent = name
+            known = (name,)
+        _atomic_write(
+            marker,
+            _workspace_to_toml(default_agent, known).encode("utf-8"),
+        )
+        _exclude_workspace_marker(project)
+
+    def _rewrite_workspace_identity(
+        self, project: Path, remaining: Iterable[str]
+    ) -> None:
+        marker = project / ".agentpost.toml"
+        agents = tuple(dict.fromkeys(remaining))
+        if not agents:
+            marker.unlink(missing_ok=True)
+            return
+        if not project.is_dir():
+            return
+        previous_default = None
+        if marker.is_file():
+            try:
+                with marker.open("rb") as handle:
+                    previous_default = tomllib.load(handle).get("default_agent")
+            except (OSError, tomllib.TOMLDecodeError):
+                previous_default = None
+        default_agent = previous_default if previous_default in agents else agents[0]
+        _atomic_write(
+            marker,
+            _workspace_to_toml(default_agent, agents).encode("utf-8"),
+        )
 
     def list_groups(self) -> dict[str, tuple[str, ...]]:
         self.initialize()
@@ -772,10 +879,11 @@ def _profile_to_toml(profile: Profile) -> str:
         f"version = {profile.version}",
         f"name = {_toml_string(profile.name)}",
         f"display_name = {_toml_string(profile.display_name)}",
-        f"cli = {_toml_string(profile.cli)}",
         f"kind = {_toml_string(profile.kind)}",
         f"summary = {_toml_string(profile.summary)}",
     ]
+    if profile.cli is not None:
+        fields.append(f"cli_hint = {_toml_string(profile.cli)}")
     if profile.organization is not None:
         fields.append(f"organization = {_toml_string(profile.organization)}")
     for name in (
@@ -823,3 +931,48 @@ def _binding_to_toml(binding: Binding) -> str:
             "",
         )
     )
+
+
+def _workspace_to_toml(default_agent: str, known_agents: Iterable[str]) -> str:
+    _validate_agent_name(default_agent)
+    known = tuple(dict.fromkeys(known_agents))
+    if default_agent not in known:
+        known = (default_agent, *known)
+    for name in known:
+        _validate_agent_name(name)
+    return "\n".join(
+        (
+            "version = 1",
+            f"default_agent = {_toml_string(default_agent)}",
+            f"known_agents = {_toml_array(known)}",
+            "",
+        )
+    )
+
+
+def _exclude_workspace_marker(project: Path) -> None:
+    git = project / ".git"
+    if git.is_file():
+        try:
+            value = git.read_text(encoding="utf-8").strip()
+        except OSError:
+            return
+        if not value.startswith("gitdir:"):
+            return
+        git = (project / value.removeprefix("gitdir:").strip()).resolve()
+    if not git.is_dir():
+        return
+    exclude = git / "info" / "exclude"
+    try:
+        existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+        lines = existing.splitlines()
+        if ".agentpost.toml" in lines:
+            return
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        prefix = (
+            existing if not existing or existing.endswith("\n") else existing + "\n"
+        )
+        _atomic_write(exclude, f"{prefix}.agentpost.toml\n".encode("utf-8"))
+    except OSError:
+        # Identity binding remains valid when Git metadata is read-only.
+        return

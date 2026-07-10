@@ -119,6 +119,16 @@ class RoutingTest(unittest.TestCase):
         self.assertIn("/evidence/bounded-reads.md", match.evidence)
         self.assertTrue(any("evidence-backed" in reason for reason in match.reasons))
 
+    def test_match_reasons_do_not_treat_stopwords_as_responsibility_evidence(self) -> None:
+        match = find_agents(
+            self.office,
+            "identity and ingestion for state",
+            include_offline=True,
+        )[0]
+        reasons = " ".join(match.reasons)
+        self.assertNotIn("tokens: and", reasons)
+        self.assertNotIn("tokens: for", reasons)
+
     def test_resolve_deduplicates_groups_selectors_and_skips_sender(self) -> None:
         result = resolve_recipients(
             self.office,
@@ -240,6 +250,17 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(
             identify_agent(self.office, root, cli="codex", agent="marketing").name,
             "marketing",
+        )
+
+    def test_workspace_default_is_cli_neutral_and_explicit_identity_still_wins(self) -> None:
+        root = Path(self.temp.name) / "shared-neutral"
+        root.mkdir()
+        self.office.bind_agent("k", "claude", root)
+        self.office.bind_agent("cx", "codex", root)
+        self.assertEqual(identify_agent(self.office, root, cli="codex").name, "k")
+        self.assertEqual(
+            identify_agent(self.office, root, cli="claude", agent="cx").name,
+            "cx",
         )
 
     def test_bare_join_candidate_uses_unique_deepest_profile_root(self) -> None:

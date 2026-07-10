@@ -20,6 +20,7 @@ fi
 mkdir -p "$bin_dir"
 ln -sf "$install_dir/bin/agentpost" "$bin_dir/agentpost"
 "$bin_dir/agentpost" init --connection-mode "$connection_mode"
+"$bin_dir/agentpost" migrate
 
 printf 'AgentPost installed: %s\n' "$bin_dir/agentpost"
 case ":${PATH:-}:" in

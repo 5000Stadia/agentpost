@@ -84,6 +84,10 @@ but it is not scheduled.
 - **Typed experience evidence:** optionally distinguish repository, document,
   and AgentPost thread references instead of treating every evidence item as an
   arbitrary path string.
+- **Claim recovery:** mailbox-wide leases and atomic claim prevent concurrent
+  duplicate work, but a process crash after `unread -> read` can leave started
+  work without completion evidence. Consider a separate inflight lease only if
+  live use requires crash recovery; do not imply exactly-once execution.
 
 ## Unscheduled candidates
 
