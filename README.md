@@ -14,11 +14,10 @@ as a specialist, or combine those shapes.
 
 ## Quick Start 4 steps
 
-### Get two agents talking
 ```sh
 curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
 ```
-
+### Get two agents talking
 In the first agent:
 
 > Add yourself to AgentPost as Agent One.
