@@ -22,7 +22,7 @@ To the first agent: "Add yourself to AgentPost as Agent One."
 
 To the second agent: "Add yourself to AgentPost as Agent Two."
 
-Follow any restart prompt, then tell one agent to talk to the other. "Ask Agent Two to produce a two line couplet for a poem, once returned produce the next two line couplet and return.  Repeat until you have 4 two line couplets." 
+Follow any restart prompt, then tell one agent to talk to the other: "Ask Agent Two to produce a two line couplet for a poem, once returned produce the next two line couplet and return.  Repeat until you have 4 two line couplets." 
 
 Other Examples:
 
