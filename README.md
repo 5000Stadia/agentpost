@@ -132,8 +132,9 @@ explicit exception form `agentpost join NAME`.
 `join` is idempotent and is the normal second and final onboarding step. It
 creates a machine-local `.agentpost.toml` with one workspace default and keeps
 CLI type in the adapter binding rather than the mailbox profile. AgentPost adds
-that marker to `.git/info/exclude` when possible. The equivalent advanced
-installation command is:
+that marker to `.git/info/exclude` when possible. Re-running `join` refreshes
+and enables an existing cached integration after a package upgrade. The
+equivalent advanced installation command is:
 
 ```sh
 agentpost install claude --agent writer --project /work/docs

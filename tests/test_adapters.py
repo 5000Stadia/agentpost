@@ -268,6 +268,41 @@ lease.release()
         self.assertEqual((binding.agent, binding.cli), ("cx", "codex"))
         self.assertEqual(binding.project, str(project.resolve()))
 
+    def test_claude_install_refreshes_and_enables_an_existing_plugin(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "claude-project"
+        project.mkdir()
+        with patch("agentpost.installer._integration_source", return_value=project):
+            with patch("agentpost.installer._run") as run:
+                install(office, "claude", "k", project)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            ["claude", "plugin", "marketplace", "update", "agentpost-local"],
+            commands,
+        )
+        self.assertIn(
+            [
+                "claude",
+                "plugin",
+                "update",
+                "agentpost@agentpost-local",
+                "--scope",
+                "local",
+            ],
+            commands,
+        )
+        self.assertIn(
+            [
+                "claude",
+                "plugin",
+                "enable",
+                "agentpost@agentpost-local",
+                "--scope",
+                "local",
+            ],
+            commands,
+        )
+
     def test_antigravity_hooks_inject_each_unread_id_once_without_claiming(self) -> None:
         office = self.office()
         project = Path(self.temp.name) / "antigravity-project"

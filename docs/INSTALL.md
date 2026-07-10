@@ -125,6 +125,11 @@ agentpost connect app --cli codex --project /work/application
 agentpost identify --cli codex --cwd /work/application
 ```
 
+After upgrading the AgentPost package, re-run the same `join` command. Claude
+refreshes its marketplace cache, updates and enables the local plugin; Codex
+reinstalls from a cache-busted local manifest; Antigravity validates and
+reinstalls its plugin. Mail and workspace identity remain untouched.
+
 Moving a project is a new binding, not a mailbox migration. Connect the new
 path, verify it, then remove the old default:
 

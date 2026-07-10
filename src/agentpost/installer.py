@@ -32,10 +32,37 @@ def install(office: PostOffice, cli: str, agent: str, project: Path) -> None:
             allow_already=True,
         )
         _run(
+            ["claude", "plugin", "marketplace", "update", "agentpost-local"],
+            cwd=project,
+        )
+        _run(
             [
                 "claude",
                 "plugin",
                 "install",
+                "agentpost@agentpost-local",
+                "--scope",
+                "local",
+            ],
+            cwd=project,
+            allow_already=True,
+        )
+        _run(
+            [
+                "claude",
+                "plugin",
+                "update",
+                "agentpost@agentpost-local",
+                "--scope",
+                "local",
+            ],
+            cwd=project,
+        )
+        _run(
+            [
+                "claude",
+                "plugin",
+                "enable",
                 "agentpost@agentpost-local",
                 "--scope",
                 "local",
