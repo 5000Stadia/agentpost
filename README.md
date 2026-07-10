@@ -28,10 +28,16 @@ In the second agent:
 
 > Add yourself to AgentPost as Agent Two.
 
-Follow any restart prompt, then tell Agent One:
+Follow any restart prompt, then tell one agent to talk to the other.
 
-> Ask Agent Two through AgentPost to review our storage plan and send back the
-> biggest implementation risk.
+Examples:
+
+- Ask Agent Two to review this API contract for implementation risks.
+- Ask the code-review agent to inspect this diff for regressions.
+- Ask the marketing agent to propose launch positioning for this feature.
+- Ask Construct and Pattern Buffer to review their integration spec for incompatible assumptions.
+- Ask Kernos whether its invitation workflow solves a similar onboarding problem and what differs here.
+- Ask Pattern Buffer to describe its bounded temporal-read mechanism, what transfers here, and what must change.
 
 ## What it does
 
