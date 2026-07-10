@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+import os
+import select
 import shutil
 import subprocess
+import tempfile
+import time
 import tomllib
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
+from .codex_generation import CODEX_PLUGIN_ID, codex_generation_status
 from .core import AgentPostError, PostOffice
 from .presence import agent_presence
 from .routing import identify_agent
@@ -18,6 +23,14 @@ class Check:
     name: str
     ok: bool
     detail: str
+
+
+CODEX_USER_HOOK_COMMAND = "agentpost internal-codex-hook user-prompt-submit"
+CODEX_USER_HOOK = {
+    "type": "command",
+    "command": CODEX_USER_HOOK_COMMAND,
+    "statusMessage": "Checking AgentPost mail",
+}
 
 
 def install(office: PostOffice, cli: str, agent: str, project: Path) -> None:
@@ -71,15 +84,26 @@ def install(office: PostOffice, cli: str, agent: str, project: Path) -> None:
             allow_already=True,
         )
     elif cli == "codex":
+        _install_codex_user_hook()
         _run(
             ["codex", "plugin", "marketplace", "add", str(source)],
             cwd=project,
             allow_already=True,
         )
         _run(
-            ["codex", "plugin", "add", "agentpost@agentpost-local"],
+            ["codex", "plugin", "remove", CODEX_PLUGIN_ID],
             cwd=project,
-            allow_already=True,
+            allow_missing=True,
+        )
+        _run(
+            ["codex", "plugin", "add", CODEX_PLUGIN_ID],
+            cwd=project,
+        )
+        print(
+            "AgentPost refreshed the Codex plugin and user prompt hook. On first "
+            "install, open `/hooks` and trust all three stable AgentPost hooks. "
+            "Reload a process that predates the prompt hook, then complete one "
+            "prompt to verify the active generation."
         )
     elif cli == "antigravity":
         _run(
@@ -116,6 +140,7 @@ def uninstall(cli: str, project: Path) -> None:
             allow_missing=True,
         )
     elif cli == "codex":
+        _remove_codex_user_hook()
         _run(
             ["codex", "plugin", "remove", "agentpost@agentpost-local"],
             cwd=project,
@@ -159,7 +184,7 @@ def doctor(
     if adapter_cli == "claude":
         checks.extend(_doctor_claude(project))
     elif adapter_cli == "codex":
-        checks.extend(_doctor_codex())
+        checks.extend(_doctor_codex(office, profile.name, project))
     elif adapter_cli == "python":
         checks.append(
             Check(
@@ -177,7 +202,12 @@ def doctor(
 
 def armed(office: PostOffice, agent: str) -> tuple[bool, str]:
     value = agent_presence(office, agent)
-    return value.active and value.healthy and value.wake_capable, value.detail
+    detail = value.detail
+    if _agent_uses_codex(office, agent):
+        generation = codex_generation_status(office, agent)
+        if not generation.current:
+            detail = f"{detail}; {generation.detail}"
+    return value.active and value.healthy and value.wake_capable, detail
 
 
 def _resolve_adapter_cli(
@@ -225,24 +255,270 @@ def _doctor_claude(project: Path) -> tuple[Check, ...]:
         return (Check("claude-plugin", False, str(exc)),)
 
 
-def _doctor_codex() -> tuple[Check, ...]:
+def _doctor_codex(
+    office: PostOffice,
+    agent: str,
+    project: Path,
+) -> tuple[Check, ...]:
     config_path = Path.home() / ".codex" / "config.toml"
     try:
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         return (Check("codex-config", False, str(exc)),)
-    plugin = data.get("plugins", {}).get("agentpost@agentpost-local", {})
-    hooks = data.get("hooks", {}).get("state", {})
-    trusted = {
-        key
-        for key, value in hooks.items()
-        if key.startswith("agentpost@agentpost-local:") and value.get("trusted_hash")
-    }
+    plugin = data.get("plugins", {}).get(CODEX_PLUGIN_ID, {})
+    try:
+        hooks = _list_codex_hooks(project)
+        trusted_events, problems = _trusted_agentpost_hooks(hooks)
+        trust_detail = f"{len(trusted_events)}/3 hooks trusted"
+        if problems:
+            trust_detail += "; " + ", ".join(problems)
+    except AgentPostError as exc:
+        trusted_events = set()
+        trust_detail = str(exc)
+    generation = codex_generation_status(office, agent)
     return (
         Check("codex-plugin", plugin.get("enabled") is True, "enabled" if plugin else "not installed"),
-        Check("codex-hook-trust", len(trusted) >= 2, f"{len(trusted)}/2 hook records trusted"),
+        Check(
+            "codex-hook-trust",
+            len(trusted_events) == 3,
+            trust_detail
+            + ("" if len(trusted_events) == 3 else "; open `/hooks` and trust all AgentPost hooks"),
+        ),
         Check("codex-node", shutil.which("node") is not None, shutil.which("node") or "not found"),
+        Check("codex-generation", generation.current, generation.detail),
     )
+
+
+def _list_codex_hooks(project: Path, timeout: float = 5.0) -> list[dict]:
+    executable = shutil.which("codex")
+    if executable is None:
+        raise AgentPostError("codex executable not found")
+    try:
+        process = subprocess.Popen(
+            [executable, "app-server"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except OSError as exc:
+        raise AgentPostError(f"cannot start Codex app server: {exc}") from exc
+    try:
+        _codex_app_server_send(
+            process,
+            {
+                "method": "initialize",
+                "id": 1,
+                "params": {
+                    "clientInfo": {
+                        "name": "agentpost-doctor",
+                        "title": "AgentPost Doctor",
+                        "version": "0.0.9",
+                    },
+                    "capabilities": {
+                        "experimentalApi": True,
+                        "requestAttestation": False,
+                        "optOutNotificationMethods": [],
+                    },
+                },
+            },
+        )
+        _codex_app_server_response(process, 1, timeout)
+        _codex_app_server_send(process, {"method": "initialized", "params": {}})
+        _codex_app_server_send(
+            process,
+            {
+                "method": "hooks/list",
+                "id": 2,
+                "params": {"cwds": [str(project.resolve())]},
+            },
+        )
+        response = _codex_app_server_response(process, 2, timeout)
+        if "error" in response:
+            raise AgentPostError(f"Codex hooks/list failed: {response['error']}")
+        records = response.get("result", {}).get("data", [])
+        if not isinstance(records, list) or len(records) != 1:
+            raise AgentPostError("Codex hooks/list returned an invalid workspace result")
+        hooks = records[0].get("hooks", {})
+        if not isinstance(hooks, list):
+            raise AgentPostError("Codex hooks/list returned an invalid hook list")
+        return [hook for hook in hooks if isinstance(hook, dict)]
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=1)
+
+
+def _codex_app_server_send(process: subprocess.Popen, message: dict) -> None:
+    if process.stdin is None:
+        raise AgentPostError("Codex app server stdin is unavailable")
+    try:
+        process.stdin.write(json.dumps(message) + "\n")
+        process.stdin.flush()
+    except (BrokenPipeError, OSError) as exc:
+        raise AgentPostError(f"Codex app server closed unexpectedly: {exc}") from exc
+
+
+def _codex_app_server_response(
+    process: subprocess.Popen,
+    request_id: int,
+    timeout: float,
+) -> dict:
+    if process.stdout is None:
+        raise AgentPostError("Codex app server stdout is unavailable")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        readable, _, _ = select.select([process.stdout], [], [], remaining)
+        if not readable:
+            break
+        line = process.stdout.readline()
+        if not line:
+            break
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(message, dict) and message.get("id") == request_id:
+            return message
+    raise AgentPostError(f"Codex app server timed out waiting for request {request_id}")
+
+
+def _trusted_agentpost_hooks(hooks: list[dict]) -> tuple[set[str], list[str]]:
+    expected = {
+        "userPromptSubmit": (None, CODEX_USER_HOOK_COMMAND),
+        "sessionStart": (CODEX_PLUGIN_ID, "agentpost internal-codex-hook session-start"),
+        "stop": (CODEX_PLUGIN_ID, "agentpost internal-codex-hook stop"),
+    }
+    trusted: set[str] = set()
+    problems: list[str] = []
+    for event, (plugin_id, command) in expected.items():
+        matches = [
+            hook
+            for hook in hooks
+            if hook.get("eventName") == event
+            and hook.get("pluginId") == plugin_id
+            and hook.get("command") == command
+        ]
+        if not matches:
+            problems.append(f"{event} missing")
+        elif any(
+            hook.get("enabled") is True and hook.get("trustStatus") == "trusted"
+            for hook in matches
+        ):
+            trusted.add(event)
+        else:
+            problems.append(f"{event} not trusted")
+    return trusted, problems
+
+
+def _agent_uses_codex(office: PostOffice, agent: str) -> bool:
+    try:
+        profile = office.load_profile(agent)
+    except (AgentPostError, OSError, ValueError):
+        return False
+    if profile.cli == "codex":
+        return True
+    return any(
+        binding.agent == agent and binding.cli == "codex"
+        for binding in office.list_bindings()
+    )
+
+
+def _install_codex_user_hook(home: Path | None = None) -> None:
+    path = _codex_user_hooks_path(home)
+    data = _read_codex_user_hooks(path)
+    hooks = data.setdefault("hooks", {})
+    groups = hooks.setdefault("UserPromptSubmit", [])
+    if not isinstance(groups, list):
+        raise AgentPostError(f"invalid UserPromptSubmit groups in {path}")
+
+    found = False
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            raise AgentPostError(f"invalid UserPromptSubmit hook group in {path}")
+        handlers = []
+        for handler in group["hooks"]:
+            if not isinstance(handler, dict):
+                raise AgentPostError(f"invalid UserPromptSubmit handler in {path}")
+            if _is_agentpost_user_hook(handler):
+                if not found:
+                    handlers.append(dict(CODEX_USER_HOOK))
+                    found = True
+            else:
+                handlers.append(handler)
+        group["hooks"] = handlers
+    if not found:
+        groups.append({"hooks": [dict(CODEX_USER_HOOK)]})
+    _atomic_json_file(path, data)
+
+
+def _remove_codex_user_hook(home: Path | None = None) -> None:
+    path = _codex_user_hooks_path(home)
+    if not path.exists():
+        return
+    data = _read_codex_user_hooks(path)
+    hooks = data.get("hooks", {})
+    groups = hooks.get("UserPromptSubmit", [])
+    if not isinstance(groups, list):
+        raise AgentPostError(f"invalid UserPromptSubmit groups in {path}")
+    retained = []
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            raise AgentPostError(f"invalid UserPromptSubmit hook group in {path}")
+        handlers = [
+            handler
+            for handler in group["hooks"]
+            if not (isinstance(handler, dict) and _is_agentpost_user_hook(handler))
+        ]
+        if handlers:
+            retained.append({**group, "hooks": handlers})
+    if retained:
+        hooks["UserPromptSubmit"] = retained
+    else:
+        hooks.pop("UserPromptSubmit", None)
+    _atomic_json_file(path, data)
+
+
+def _codex_user_hooks_path(home: Path | None = None) -> Path:
+    return (home or Path.home()) / ".codex" / "hooks.json"
+
+
+def _read_codex_user_hooks(path: Path) -> dict:
+    if not path.exists():
+        return {"hooks": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AgentPostError(f"cannot read Codex user hooks {path}: {exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("hooks", {}), dict):
+        raise AgentPostError(f"invalid Codex user hooks document: {path}")
+    return data
+
+
+def _is_agentpost_user_hook(handler: dict) -> bool:
+    command = handler.get("command")
+    return isinstance(command, str) and command.startswith(
+        "agentpost internal-codex-hook user-prompt-submit"
+    )
+
+
+def _atomic_json_file(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}-")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def _doctor_antigravity(project: Path) -> tuple[Check, ...]:

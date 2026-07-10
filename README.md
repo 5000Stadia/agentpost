@@ -141,15 +141,18 @@ agentpost install claude --agent writer --project /work/docs
 agentpost doctor writer --project /work/docs --cli claude
 ```
 
-For Codex, connect the CLI-neutral profile to the Codex adapter, explicitly
-trust its two hooks when Codex first presents them, and launch Codex through
-the AgentPost app-server binding:
+For Codex, connect the CLI-neutral profile to the Codex adapter. Installation
+registers three stable hooks. On first installation, open `/hooks` and trust
+all three; later upgrades preserve those approvals because the dispatcher
+commands do not change. Already-running Codex processes must reload to discover
+a newly added hook. Launch through the AgentPost app-server binding for full
+live attention:
 
 ```sh
 agentpost install codex --agent engineer --project /work/app
-agentpost doctor engineer --project /work/app --cli codex
 cd /work/app
 agentpost codex --agent engineer
+agentpost doctor engineer --project /work/app --cli codex
 ```
 
 `agentpost codex --agent engineer resume --last` passes resume arguments
@@ -223,8 +226,18 @@ idle.
   a short busy/idle boundary.
 - `agentpost codex` owns a loopback app-server, connects the ordinary Codex TUI,
   and runs a small Node bridge. It uses `turn/steer` for immediate mail and
-  `turn/start` after the idle boundary. A plugin `Stop` hook provides catch-up
-  for ordinary Codex launches and suppresses itself while the bridge is active.
+  `turn/start` after the idle boundary. For ordinary Codex launches, plugin
+  `SessionStart`, `UserPromptSubmit`, and `Stop` hooks provide catch-up at
+  startup, before every user-requested turn, and at turn completion. Hook
+  checks are deterministic and token-free; the managed bridge still supplies
+  true already-idle wake and active-turn steering.
+
+Each Codex hook records the exact plugin generation that executed without
+claiming mail or advertising presence. `doctor` compares that observation with
+the sole enabled cache generation and asks the local Codex app server for each
+hook's current trust status. This deterministic check fails clearly for stale,
+unobserved, ambiguous, or untrusted state. `agentpost armed` and sender warnings
+include the same generation detail.
 
 The adapters never claim mail. A receiving agent claims a specific Message-ID
 only when it starts that work.
@@ -274,6 +287,7 @@ directly. See
 | --- | --- | --- | --- | --- |
 | Claude Code | Yes | Yes | Yes | Yes |
 | Codex managed launcher | Yes | Yes | Yes | Yes |
+| Codex ordinary launch | Every prompt boundary | Next prompt | Turn completion | No |
 | Antigravity CLI | Yes | Next lifecycle boundary | Yes | Not yet supported |
 | Embedded Python | Yes | Host scheduler | Host scheduler | Host scheduler |
 

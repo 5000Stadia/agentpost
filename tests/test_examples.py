@@ -9,11 +9,43 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from agentpost.codex_generation import CODEX_HOOK_GENERATION  # noqa: E402
 
 
 class DocumentationExampleTest(unittest.TestCase):
+    def test_codex_hooks_share_the_manifest_generation(self) -> None:
+        plugin_root = ROOT / "integrations" / "codex" / "plugins" / "agentpost"
+        manifest = json.loads(
+            (plugin_root / ".codex-plugin" / "plugin.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        hooks = json.loads(
+            (plugin_root / "hooks" / "hooks.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            set(hooks["hooks"]),
+            {"SessionStart", "Stop"},
+        )
+        commands = [
+            hook["command"]
+            for groups in hooks["hooks"].values()
+            for group in groups
+            for hook in group["hooks"]
+        ]
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(
+            set(commands),
+            {
+                "agentpost internal-codex-hook session-start",
+                "agentpost internal-codex-hook stop",
+            },
+        )
+        self.assertEqual(CODEX_HOOK_GENERATION, manifest["version"])
+
     def test_bootstrap_installer_is_valid_posix_shell(self) -> None:
         subprocess.run(
             ["sh", "-n", str(ROOT / "scripts" / "install.sh")],

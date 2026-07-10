@@ -76,13 +76,15 @@ but it is not scheduled.
   must be durable before this can work across process restarts.
 - **Machine-readable capability report:** expose adapter support and degraded
   behavior in structured output, especially for catch-up-only integrations.
-- **Adapter attach and generation truth:** sweep Claude, Codex, Python, and
-  Antigravity for already-running processes that predate install or upgrade.
-  Provide a supported in-process attach path where possible; otherwise print the
-  reload boundary explicitly. Report running versus installed generations, use
-  one shared health vocabulary, and distinguish failed `immediate` interruption
-  from routine queued delivery. The K/PB/Construct sessions that predate their
-  plugin refresh are the first live acceptance fixtures.
+- **Adapter attach and generation truth:** the Codex slice is done: all three
+  lifecycle hooks stamp the exact executing generation before injection
+  suppression, doctor compares it with the enabled cache and Codex's current
+  hook trust, and stable dispatcher commands preserve first-install approval
+  across upgrades while naming the reload boundary. Sweep Claude and
+  Antigravity next, using the same running-versus-installed vocabulary and
+  distinguishing failed `immediate` interruption from routine queued delivery.
+  Python already exposes live runtime-instance ownership rather than a plugin
+  generation.
 - **Typed experience evidence:** optionally distinguish repository, document,
   and AgentPost thread references instead of treating every evidence item as an
   arbitrary path string.

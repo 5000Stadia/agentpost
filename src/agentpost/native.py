@@ -13,6 +13,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from .adapters import MailboxWatcher
+from .codex_generation import CODEX_HOOK_GENERATION, codex_hook_marker
 from .core import AgentPostError, PostOffice
 from .ownership import ConsumerLease
 from .presence import HEARTBEAT_INTERVAL_SECONDS
@@ -94,12 +95,9 @@ def claude_monitor() -> int:
         lease.release()
 
 
-def codex_hook(event_name: str) -> int:
-    if event_name not in {"session-start", "stop"}:
+def codex_hook(event_name: str, generation: str | None = None) -> int:
+    if event_name not in {"session-start", "user-prompt-submit", "stop"}:
         raise ValueError(f"invalid Codex hook event: {event_name}")
-    if os.environ.get("AGENTPOST_CODEX_BRIDGE") == "1":
-        print("{}")
-        return 0
     event = json.load(sys.stdin)
     office = PostOffice(_runtime_root())
     try:
@@ -110,6 +108,20 @@ def codex_hook(event_name: str) -> int:
             agent=os.environ.get("AGENTPOST_AGENT"),
         )
     except (AgentPostError, OSError, ValueError):
+        print("{}")
+        return 0
+    _atomic_json(
+        codex_hook_marker(office, profile.name, event_name),
+        {
+            "adapter": "codex-hook",
+            "generation": generation or CODEX_HOOK_GENERATION,
+            "event": event_name,
+            "observed_at": time.time(),
+            "session_id": str(event.get("session_id", event.get("sessionId", ""))),
+            "cwd": str(event.get("cwd", Path.cwd())),
+        },
+    )
+    if os.environ.get("AGENTPOST_CODEX_BRIDGE") == "1":
         print("{}")
         return 0
     lease = ConsumerLease(office, profile.name, "codex-hook")
@@ -131,12 +143,16 @@ def codex_hook(event_name: str) -> int:
             "starting it, process the work, reply by Message-ID, and give the user "
             "a short synopsis."
         )
-        if event_name == "session-start":
+        hook_event_names = {
+            "session-start": "SessionStart",
+            "user-prompt-submit": "UserPromptSubmit",
+        }
+        if event_name in hook_event_names:
             print(
                 json.dumps(
                     {
                         "hookSpecificOutput": {
-                            "hookEventName": "SessionStart",
+                            "hookEventName": hook_event_names[event_name],
                             "additionalContext": instruction,
                         }
                     }

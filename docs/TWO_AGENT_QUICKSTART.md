@@ -126,9 +126,13 @@ agentpost doctor agent-two --project "$PWD" --cli codex
 agentpost codex --agent agent-two
 ```
 
-Trust both AgentPost hooks when Codex first prompts. Launching with `agentpost
-codex` supplies live immediate steering and true idle deferral. An ordinary
-Codex launch retains lifecycle-hook catch-up but not the full live bridge.
+Installation registers three stable AgentPost hooks. On first install, open
+`/hooks` and trust all three; later upgrades preserve those approvals. Reload a
+Codex process that predates the prompt hook, then submit and complete one prompt
+so `doctor` can verify the active generation. Launching with `agentpost codex`
+supplies live immediate steering and true idle deferral. An ordinary Codex
+launch checks at startup, before each prompt, and at turn completion but does
+not provide already-idle wake.
 
 ### Embedded Python
 

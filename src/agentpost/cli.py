@@ -234,7 +234,10 @@ def build_parser() -> argparse.ArgumentParser:
     native_claude_boundary.add_argument("--delay", type=float, default=0.0)
     commands.add_parser("internal-claude-monitor")
     native_codex = commands.add_parser("internal-codex-hook")
-    native_codex.add_argument("event", choices=("session-start", "stop"))
+    native_codex.add_argument(
+        "event", choices=("session-start", "user-prompt-submit", "stop")
+    )
+    native_codex.add_argument("--generation")
     native_antigravity = commands.add_parser("internal-antigravity-hook")
     native_antigravity.add_argument("event", choices=("pre-invocation", "stop"))
     native_snapshot = commands.add_parser("internal-snapshot")
@@ -529,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "internal-claude-monitor":
             return claude_monitor()
         elif args.command == "internal-codex-hook":
-            return codex_hook(args.event)
+            return codex_hook(args.event, args.generation)
         elif args.command == "internal-antigravity-hook":
             return antigravity_hook(args.event)
         elif args.command == "internal-snapshot":

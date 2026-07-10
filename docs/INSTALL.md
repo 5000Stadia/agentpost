@@ -127,8 +127,10 @@ agentpost identify --cli codex --cwd /work/application
 
 After upgrading the AgentPost package, re-run the same `join` command. Claude
 refreshes its marketplace cache, updates and enables the local plugin; Codex
-reinstalls from a cache-busted local manifest; Antigravity validates and
-reinstalls its plugin. Mail and workspace identity remain untouched.
+reinstalls from a cache-busted local manifest while its three stable dispatcher
+commands preserve existing trust; Antigravity validates and reinstalls its
+plugin. Mail and workspace identity remain untouched. Reload any Codex process
+that predates a newly added hook.
 
 Moving a project is a new binding, not a mailbox migration. Connect the new
 path, verify it, then remove the old default:
@@ -186,7 +188,12 @@ mailbox, and `claude-plugin`.
 agentpost install codex --agent app --project /work/application
 ```
 
-Start Codex once and explicitly trust both AgentPost hooks when prompted. Then:
+Installation removes and re-adds the local plugin and structurally merges one
+AgentPost handler into `~/.codex/hooks.json`, preserving unrelated hooks. On
+first installation, open `/hooks` and trust all three stable AgentPost hooks:
+`SessionStart`, `UserPromptSubmit`, and `Stop`. Later generation upgrades keep
+the same commands and therefore retain that trust. Reload a process that
+predates the prompt hook. Then:
 
 ```sh
 agentpost doctor app --project /work/application --cli codex
@@ -194,10 +201,18 @@ cd /work/application
 agentpost codex --agent app
 ```
 
-Doctor checks that the plugin is enabled, both hook trust records exist, and
-Node is available. Ordinary `codex` sessions retain SessionStart/Stop catch-up,
-but real-time immediate steering and true idle deferral require `agentpost
-codex`.
+Doctor checks that the plugin is enabled, asks the local Codex app server for
+the three hooks' current trust status, verifies Node, and compares the
+generation observed by each event with the single enabled cache generation.
+This does not invoke a model. Immediately after install it may report
+`unobserved`; reload Codex, submit one prompt, and let that turn complete to
+close all three event checks. A stale or ambiguous generation remains a failure
+with precise approval, reinstall, and reload instructions.
+
+Ordinary `codex` sessions check unread mail at startup, before every submitted
+prompt, and at turn completion without creating a polling conversation or
+claiming mail. Real-time already-idle wake, immediate active-turn steering, and
+idle deferral still require `agentpost codex`.
 
 The launcher binds only to `127.0.0.1`, creates a fresh app-server for the TUI,
 and removes its active marker and child processes on exit. Its diagnostic trace
@@ -242,7 +257,14 @@ agentpost armed AGENT
 agentpost status AGENT
 agentpost profiles --offline
 agentpost doctor AGENT --project /work/project --cli claude
+agentpost doctor AGENT --project /work/project --cli codex
 ```
+
+For incomplete Codex trust, approve the stable AgentPost hooks in `/hooks`. For
+a stale installed cache, re-run `agentpost install codex` (or the same `join`
+command). Reload only when events remain unobserved, then submit one prompt and
+let it complete. A historical hook marker never means the agent is online; only
+a fresh live bridge heartbeat can arm already-idle wake.
 
 Never resend an actionable letter through a fallback channel. Use the fallback
 only for installation control or a pointer to the existing Message-ID.

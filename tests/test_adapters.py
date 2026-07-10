@@ -31,7 +31,21 @@ from agentpost.native import (  # noqa: E402
     codex_hook,
     codex_snapshot,
 )
-from agentpost.installer import _integration_source, armed, doctor, install  # noqa: E402
+from agentpost.codex_generation import (  # noqa: E402
+    _installed_codex_generation,
+    codex_generation_status,
+    codex_hook_marker,
+)
+from agentpost.installer import (  # noqa: E402
+    CODEX_USER_HOOK_COMMAND,
+    _install_codex_user_hook,
+    _integration_source,
+    _remove_codex_user_hook,
+    _trusted_agentpost_hooks,
+    armed,
+    doctor,
+    install,
+)
 from agentpost.presence import agent_presence  # noqa: E402
 from agentpost.ownership import ConsumerLease  # noqa: E402
 
@@ -51,8 +65,16 @@ class AdapterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / "post"
+        self.agentpost_environment = {
+            name: os.environ.pop(name, None)
+            for name in ("AGENTPOST_AGENT", "AGENTPOST_ROOT")
+        }
 
     def tearDown(self) -> None:
+        for name, value in self.agentpost_environment.items():
+            os.environ.pop(name, None)
+            if value is not None:
+                os.environ[name] = value
         self.temp.cleanup()
 
     def office(self, notifier=None) -> PostOffice:
@@ -214,9 +236,183 @@ lease.release()
         output = StringIO()
         with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
             with patch("sys.stdin", event), redirect_stdout(output):
-                self.assertEqual(codex_hook("stop"), 0)
+                self.assertEqual(codex_hook("stop", "generation-2"), 0)
         self.assertEqual(output.getvalue().strip(), "{}")
         self.assertEqual(len(office.list_messages("cx", "unread")), 0)
+        observed = json.loads(codex_hook_marker(office, "cx", "stop").read_text())
+        self.assertEqual(observed["generation"], "generation-2")
+
+    def test_codex_user_prompt_hook_injects_without_claiming(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "cx-project"
+        project.mkdir()
+        office.register_profile(
+            Profile(
+                name="cx",
+                display_name="CX",
+                cli="codex",
+                kind="project",
+                summary="Agent cx",
+                projects=("cx",),
+                project_roots=(str(project),),
+            )
+        )
+        sent = office.send("k", "cx", "review this")
+        event = StringIO(json.dumps({"cwd": str(project), "session_id": "session-1"}))
+        output = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+            with patch("sys.stdin", event), redirect_stdout(output):
+                self.assertEqual(
+                    codex_hook("user-prompt-submit", "generation-3"),
+                    0,
+                )
+        result = json.loads(output.getvalue())
+        hook_output = result["hookSpecificOutput"]
+        self.assertEqual(hook_output["hookEventName"], "UserPromptSubmit")
+        self.assertIn(sent.message_id, hook_output["additionalContext"])
+        self.assertEqual(len(office.list_messages("cx", "unread")), 1)
+        observed = json.loads(
+            codex_hook_marker(office, "cx", "user-prompt-submit").read_text()
+        )
+        self.assertEqual(observed["session_id"], "session-1")
+        self.assertEqual(observed["event"], "user-prompt-submit")
+
+    def test_codex_hook_stamps_before_bridge_environment_suppression(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "cx-project"
+        project.mkdir()
+        office.register_profile(
+            Profile(
+                name="cx",
+                display_name="CX",
+                cli="codex",
+                kind="project",
+                summary="Agent cx",
+                projects=("cx",),
+                project_roots=(str(project),),
+            )
+        )
+        event = StringIO(json.dumps({"cwd": str(project)}))
+        output = StringIO()
+        environment = {
+            "AGENTPOST_ROOT": str(self.root),
+            "AGENTPOST_CODEX_BRIDGE": "1",
+        }
+        with patch.dict("os.environ", environment, clear=False):
+            with patch("sys.stdin", event), redirect_stdout(output):
+                codex_hook("session-start", "managed-generation")
+        self.assertEqual(json.loads(output.getvalue()), {})
+        observed = json.loads(
+            codex_hook_marker(office, "cx", "session-start").read_text()
+        )
+        self.assertEqual(observed["generation"], "managed-generation")
+
+    def test_codex_hook_stamps_when_consumer_lease_is_held(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "cx-project"
+        project.mkdir()
+        office.register_profile(
+            Profile(
+                name="cx",
+                display_name="CX",
+                cli="codex",
+                kind="project",
+                summary="Agent cx",
+                projects=("cx",),
+                project_roots=(str(project),),
+            )
+        )
+        owner = ConsumerLease(office, "cx", "codex")
+        self.assertTrue(owner.acquire())
+        try:
+            event = StringIO(json.dumps({"cwd": str(project)}))
+            output = StringIO()
+            with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+                with patch("sys.stdin", event), redirect_stdout(output):
+                    codex_hook("stop", "lease-generation")
+        finally:
+            owner.release()
+        self.assertEqual(json.loads(output.getvalue()), {})
+        observed = json.loads(codex_hook_marker(office, "cx", "stop").read_text())
+        self.assertEqual(observed["generation"], "lease-generation")
+
+    def test_codex_generation_status_is_current_stale_and_unobserved(self) -> None:
+        office = self.office()
+        home = Path(self.temp.name) / "home"
+        self._write_codex_install(home, "generation-1")
+        unobserved = codex_generation_status(office, "cx", home=home)
+        self.assertEqual(unobserved.state, "unobserved")
+        self._write_codex_observation(office, "stop", "generation-0")
+        stale = codex_generation_status(office, "cx", home=home)
+        self.assertEqual(stale.state, "stale")
+        for event in ("session-start", "user-prompt-submit", "stop"):
+            self._write_codex_observation(office, event, "generation-1")
+        current = codex_generation_status(office, "cx", home=home)
+        self.assertTrue(current.current)
+
+    def _write_codex_observation(
+        self,
+        office: PostOffice,
+        event: str,
+        generation: str,
+    ) -> None:
+        marker = codex_hook_marker(office, "cx", event)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({"generation": generation}), encoding="utf-8")
+
+    def test_multiple_codex_cache_generations_are_unknown(self) -> None:
+        home = Path(self.temp.name) / "home"
+        self._write_codex_install(home, "generation-1")
+        self._write_codex_cache(home, "generation-2")
+        generation, problem = _installed_codex_generation(home)
+        self.assertIsNone(generation)
+        self.assertIn("found 2", problem)
+
+    def test_malformed_codex_cache_generation_is_unknown(self) -> None:
+        home = Path(self.temp.name) / "home"
+        config = home / ".codex" / "config.toml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(
+            '[plugins."agentpost@agentpost-local"]\nenabled = true\n',
+            encoding="utf-8",
+        )
+        malformed = (
+            home
+            / ".codex/plugins/cache/agentpost-local/agentpost/generation-1"
+            / ".codex-plugin/plugin.json"
+        )
+        malformed.parent.mkdir(parents=True, exist_ok=True)
+        malformed.write_text("not json", encoding="utf-8")
+        generation, problem = _installed_codex_generation(home)
+        self.assertIsNone(generation)
+        self.assertIn("malformed", problem)
+
+    def _write_codex_install(self, home: Path, generation: str) -> None:
+        config = home / ".codex" / "config.toml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(
+            '[plugins."agentpost@agentpost-local"]\nenabled = true\n',
+            encoding="utf-8",
+        )
+        self._write_codex_cache(home, generation)
+
+    def _write_codex_cache(self, home: Path, generation: str) -> None:
+        manifest = (
+            home
+            / ".codex"
+            / "plugins"
+            / "cache"
+            / "agentpost-local"
+            / "agentpost"
+            / generation
+            / ".codex-plugin"
+            / "plugin.json"
+        )
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"name": "agentpost", "version": generation}),
+            encoding="utf-8",
+        )
 
     def test_armed_state_distinguishes_live_and_catchup_only_adapters(self) -> None:
         office = self.office()
@@ -269,12 +465,115 @@ lease.release()
         office = self.office()
         project = Path(self.temp.name) / "project"
         project.mkdir()
+        home = Path(self.temp.name) / "home"
         with patch("agentpost.installer._integration_source", return_value=project):
-            with patch("agentpost.installer._run"):
-                install(office, "codex", "cx", project)
+            with patch("agentpost.installer.Path.home", return_value=home):
+                with patch("agentpost.installer._run"):
+                    with redirect_stdout(StringIO()):
+                        install(office, "codex", "cx", project)
         binding = office.list_bindings()[0]
         self.assertEqual((binding.agent, binding.cli), ("cx", "codex"))
         self.assertEqual(binding.project, str(project.resolve()))
+
+    def test_codex_install_re_registers_hooks_on_every_generation(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "project"
+        project.mkdir()
+        home = Path(self.temp.name) / "home"
+        with patch("agentpost.installer._integration_source", return_value=project):
+            with patch("agentpost.installer.Path.home", return_value=home):
+                with patch("agentpost.installer._run") as run:
+                    with redirect_stdout(StringIO()):
+                        install(office, "codex", "cx", project)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(
+            commands[-2:],
+            [
+                ["codex", "plugin", "remove", "agentpost@agentpost-local"],
+                ["codex", "plugin", "add", "agentpost@agentpost-local"],
+            ],
+        )
+        user_hooks = json.loads((home / ".codex/hooks.json").read_text())
+        command = user_hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0][
+            "command"
+        ]
+        self.assertEqual(command, CODEX_USER_HOOK_COMMAND)
+
+    def test_codex_user_hook_merge_and_uninstall_preserve_unrelated_hooks(self) -> None:
+        home = Path(self.temp.name) / "home"
+        hooks_path = home / ".codex/hooks.json"
+        hooks_path.parent.mkdir(parents=True)
+        unrelated = {"type": "command", "command": "example prompt hook"}
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "description": "keep me",
+                    "hooks": {
+                        "UserPromptSubmit": [{"hooks": [unrelated]}],
+                        "Stop": [{"hooks": [{"command": "example stop"}]}],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        _install_codex_user_hook(home)
+        _install_codex_user_hook(home)
+        installed = json.loads(hooks_path.read_text())
+        prompt_handlers = [
+            handler
+            for group in installed["hooks"]["UserPromptSubmit"]
+            for handler in group["hooks"]
+        ]
+        self.assertEqual(
+            sum(handler.get("command") == CODEX_USER_HOOK_COMMAND for handler in prompt_handlers),
+            1,
+        )
+        self.assertIn(unrelated, prompt_handlers)
+        _remove_codex_user_hook(home)
+        removed = json.loads(hooks_path.read_text())
+        self.assertEqual(
+            removed["hooks"]["UserPromptSubmit"],
+            [{"hooks": [unrelated]}],
+        )
+        self.assertIn("Stop", removed["hooks"])
+        self.assertEqual(removed["description"], "keep me")
+
+    def test_codex_hook_trust_requires_current_discovered_hooks(self) -> None:
+        hooks = [
+            {
+                "eventName": "userPromptSubmit",
+                "pluginId": None,
+                "command": CODEX_USER_HOOK_COMMAND,
+                "enabled": True,
+                "trustStatus": "trusted",
+            },
+            {
+                "eventName": "sessionStart",
+                "pluginId": "agentpost@agentpost-local",
+                "command": "agentpost internal-codex-hook session-start",
+                "enabled": True,
+                "trustStatus": "trusted",
+            },
+            {
+                "eventName": "stop",
+                "pluginId": "agentpost@agentpost-local",
+                "command": "agentpost internal-codex-hook stop",
+                "enabled": True,
+                "trustStatus": "trusted",
+            },
+        ]
+        trusted, problems = _trusted_agentpost_hooks(hooks)
+        self.assertEqual(trusted, {"userPromptSubmit", "sessionStart", "stop"})
+        self.assertEqual(problems, [])
+
+        hooks[1]["trustStatus"] = "untrusted"
+        hooks.pop()
+        trusted, problems = _trusted_agentpost_hooks(hooks)
+        self.assertEqual(trusted, {"userPromptSubmit"})
+        self.assertEqual(
+            problems,
+            ["sessionStart not trusted", "stop missing"],
+        )
 
     def test_claude_install_refreshes_and_enables_an_existing_plugin(self) -> None:
         office = self.office()

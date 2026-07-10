@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This smoke owns its temporary office and identities; ignore caller overrides.
+unset AGENTPOST_AGENT AGENTPOST_ROOT
+
 AGENTPOST_BIN="${AGENTPOST_BIN:-agentpost}"
 DEMO_ROOT="$(mktemp -d)"
 POST_ROOT="$DEMO_ROOT/post"

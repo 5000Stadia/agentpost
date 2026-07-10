@@ -11,9 +11,10 @@ are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
 
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
-`agentpost@agentpost-local` plugin at 0.0.4 installed; Cx runs the Codex plugin,
-and the public Python package is at 0.0.8. Existing Claude sessions must reload
-before the refreshed hooks become live. The prior
+`agentpost@agentpost-local` plugin at 0.0.4 installed; Cx runs Codex plugin
+generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.9.
+Codex hook commands are stable across upgrades; a process that predates the
+user prompt hook must reload before that event becomes live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
 Claude skills-dir workaround, and Cx filesystem inbox drain were decommissioned
 on 2026-07-10 with historical data retained under the local AgentPost archive
@@ -39,7 +40,12 @@ or the original data directories.
 - Codex plugin plus `agentpost codex` loopback app-server binding with live
   catch-up, `turn/steer`, idle deferral, exact-ID processing, and fallback-hook
   ownership suppression.
-- Claude/Codex install, static doctor, and mailbox-preserving uninstall commands.
+- Token-free Codex `SessionStart`/`UserPromptSubmit`/`Stop` catch-up, exact
+  executed-generation markers that never imply presence, `3/3` hook-trust
+  verification, stale/unobserved/ambiguous generation diagnostics, and
+  explicit approval, reinstall, and reload recovery.
+- Claude/Codex install, deterministic doctor, and mailbox-preserving uninstall
+  commands.
 - Antigravity CLI 1.1.1 plugin, install/doctor/uninstall path, non-claiming
   PreInvocation catch-up, and Stop-boundary delivery with honest degraded
   already-idle wake reporting.
@@ -83,7 +89,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 96 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 106 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 
@@ -91,14 +97,22 @@ The final deployed-architecture council panel completed 3/3: K, PB, and
 Construct all returned GREEN with no blocking findings. PB's reply-urgency and
 presence-freshness polish was folded into 0.0.8.
 
-A wheel was built and installed into a clean temporary home. Its bundled Codex
-marketplace installed without the source checkout, static doctor stopped at the
-expected explicit hook-trust gate, and uninstall retained unread mail.
+The 0.0.9 wheel was built and installed into a clean temporary virtual
+environment and home. Its Claude, Codex, and Antigravity integrations all
+materialized without the source checkout, and the installed CLI passed the
+executable two-agent smoke.
 
 Live acceptance passed on Claude Code 2.1.206 and Codex CLI 0.144.1. Claude
 proved restart catch-up, already-idle wake, and busy-turn idle deferral. Codex
 proved restart catch-up, active-turn immediate steering, a distinct post-turn
 idle notification, bridge/fallback-hook exclusion, and child-state cleanup.
+The Codex generation slice additionally proved `3/3` current hook discovery,
+token-free trust inspection through `hooks/list`, per-event generation stamps,
+and stable trust across plugin reinstall.
+Kernos returned final implementation GREEN after independently reviewing the
+diff and rerunning the suite. Its test-hermeticity finding was fixed; all 106
+tests and the standalone smoke now also pass with inherited `AGENTPOST_AGENT`
+and `AGENTPOST_ROOT` deliberately set to unrelated values.
 Antigravity CLI 1.1.1 proved plugin loading, exact next-prompt catch-up, claim,
 and correlated reply. Its documented sidecar shape was also installed and
 enabled experimentally, but the CLI did not initialize `SidecarManager` or
@@ -111,6 +125,8 @@ delivery.
   not run on CLI 1.1.1; lifecycle catch-up is the accepted CLI behavior.
 - Opt-in live doctor automation, final rollback acceptance, and an automated
   clean-install matrix.
+- Generation-truth diagnostics for Claude and Antigravity; the Codex slice is
+  implemented and accepted.
 - Durable panel-completion notification and machine-readable adapter
   capability reporting.
 
