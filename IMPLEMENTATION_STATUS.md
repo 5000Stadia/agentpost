@@ -10,8 +10,10 @@ are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
 `https://github.com/5000Stadia/agentpost`.
 
 The local four-agent deployment now uses AgentPost as its sole actionable
-development-agent channel. Claude projects K/PB/C run the project-scoped
-`agentpost@agentpost-local` plugin at 0.0.2; Cx runs the Codex plugin. The prior
+development-agent channel. Claude projects K/PB/C have the project-scoped
+`agentpost@agentpost-local` plugin at 0.0.4 installed; Cx runs the Codex plugin,
+and the public Python package is at 0.0.8. Existing Claude sessions must reload
+before the refreshed hooks become live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
 Claude skills-dir workaround, and Cx filesystem inbox drain were decommissioned
 on 2026-07-10 with historical data retained under the local AgentPost archive
@@ -85,6 +87,10 @@ The current suite contains 96 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 
+The final deployed-architecture council panel completed 3/3: K, PB, and
+Construct all returned GREEN with no blocking findings. PB's reply-urgency and
+presence-freshness polish was folded into 0.0.8.
+
 A wheel was built and installed into a clean temporary home. Its bundled Codex
 marketplace installed without the source checkout, static doctor stopped at the
 expected explicit hook-trust gate, and uninstall retained unread mail.
@@ -110,6 +116,7 @@ delivery.
 
 See `ROADMAP.md` for priorities, optional candidates, and deliberate non-goals.
 
-The legacy inboxes remain the recovery channel. Never place the same actionable
-request in AgentPost and a legacy inbox; use legacy only for installation
-control or a pointer after a proven notification failure.
+Legacy inbox directories are read-only history and are no longer polled. Never
+place the same actionable request in AgentPost and a legacy inbox. After a
+proven notification failure, use direct installation control or a pointer to
+the existing AgentPost Message-ID, never a duplicate work request.

@@ -9,16 +9,18 @@ non-goals.
 
 ## Active closeout
 
-1. Complete the AP-DOCS-1 public-documentation round robin. K and PB have
-   completed their stages; Construct has the final live GitHub review queued.
-2. Complete Construct's individual communication-policy cutover, then verify
-   restart catch-up, immediate delivery, and idle deferral for every migrated
-   project before retiring its remaining legacy control path.
-3. Turn the existing manual wheel and clean-home checks into a repeatable
+1. Reload the already-running K/PB/Construct Claude sessions onto the installed
+   AgentPost 0.0.4 plugin generation, then re-run restart catch-up, immediate
+   delivery, and idle deferral. The prior raw watcher and directory-polling
+   processes are stopped; durable legacy folders remain read-only history.
+2. Turn the existing manual wheel and clean-home checks into a repeatable
    clean-install matrix for Python 3.11-3.13, Claude Code, and Codex.
-4. Prove final rollback behavior: partial install and uninstall must remove
+3. Prove final rollback behavior: partial install and uninstall must remove
    only installer-owned integration state while retaining mail, profiles,
    bindings, and unrelated CLI configuration.
+
+The deployed-architecture and public-documentation council round robin is
+complete: K, PB, and Construct returned 3/3 GREEN with no blocking findings.
 
 ## Antigravity CLI integration
 
@@ -79,8 +81,8 @@ but it is not scheduled.
   Provide a supported in-process attach path where possible; otherwise print the
   reload boundary explicitly. Report running versus installed generations, use
   one shared health vocabulary, and distinguish failed `immediate` interruption
-  from routine queued delivery. PB's long-lived unarmed Claude session is the
-  first live acceptance fixture.
+  from routine queued delivery. The K/PB/Construct sessions that predate their
+  plugin refresh are the first live acceptance fixtures.
 - **Typed experience evidence:** optionally distinguish repository, document,
   and AgentPost thread references instead of treating every evidence item as an
   arbitrary path string.
