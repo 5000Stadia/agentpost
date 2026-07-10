@@ -19,17 +19,17 @@ curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/i
 ```
 ### Get two agents talking
 To the first agent: 
-```sh
+```text
 Add yourself to AgentPost as Agent One.
 ```
 
 To the second agent: 
-```sh
+```text
 Add yourself to AgentPost as Agent Two.
 ```
 
 Follow any restart prompt, then tell one agent to talk to the other: 
-```sh
+```text
 Ask Agent Two to produce a couplet for a poem, append a couplet after it's return.  Repeat until you have 4 couplets.
 ```
 
