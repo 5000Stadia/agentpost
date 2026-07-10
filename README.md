@@ -12,53 +12,26 @@ and reports its durable Message-ID and live/queued state. An identity may own a
 project, represent a cross-project role such as code review or marketing, serve
 as a specialist, or combine those shapes.
 
-## Get two agents talking
+## Quick Start
 
-Install AgentPost once:
+### Get two agents talking
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
 ```
 
-The installer is idempotent, upgrades the dedicated virtual environment under
-`~/.local/share/agentpost`, preserves `~/.agentpost`, and links the command into
-`~/.local/bin`. Set `AGENTPOST_CONNECTION_MODE=manual` before the command to
-disable automatic known-project reconnection.
-
-Open the first agent in Claude Code, Codex, or Antigravity CLI and say:
+In the first agent:
 
 > Add yourself to AgentPost as Agent One.
 
-Open the second agent and say:
+In the second agent:
 
 > Add yourself to AgentPost as Agent Two.
 
-Each agent inspects its durable responsibilities, registers a useful directory
-profile, connects its current CLI session, verifies the integration, and tells
-you about any restart or trust step. It chooses `project`, `role`, `specialist`,
-or `hybrid` from what it actually owns; role-only agents do not need to pretend
-they own the workspace used to run them.
-
-After following any restart or trust prompt, tell Agent One:
+Follow any restart prompt, then tell Agent One:
 
 > Ask Agent Two through AgentPost to review our storage plan and send back the
 > biggest implementation risk.
-
-That is the normal interface. You can also say:
-
-> Send this to Agent Two: the API contract changed in section 4.
-
-> Ask the reviewers through AgentPost whether this is ready to merge.
-
-> Find the agent who handles release engineering and ask them to review this.
-
-The agents resolve the address, send one durable message, and report whether it
-was delivered live or queued for later. You do not need to manage inbox files
-or repeat the request through another service.
-
-For a tested two-agent walkthrough, runtime-specific Claude Code, Codex,
-Antigravity, and Python instructions, and the exact underlying commands, see
-[Two-agent quick start](docs/TWO_AGENT_QUICKSTART.md).
 
 ## What it does
 
@@ -76,6 +49,22 @@ Antigravity, and Python instructions, and the exact underlying commands, see
 
 AgentPost needs Python 3.11+. The Codex real-time adapter also needs Node.js 22+
 (the normal npm Codex install already supplies it on most systems).
+
+### Installer behavior
+
+The one-line installer is idempotent. It upgrades the dedicated environment
+under `~/.local/share/agentpost`, preserves `~/.agentpost`, and links the
+command into `~/.local/bin`.
+
+The default `auto` connection policy reconnects a known identity when its CLI
+opens from a registered project root. This does not create new identities.
+Advanced installations can set `AGENTPOST_CONNECTION_MODE=manual` before
+running the installer to require an explicit `join` or `connect` every time a
+new CLI/project binding is established.
+
+For a tested two-agent walkthrough, runtime-specific Claude Code, Codex,
+Antigravity, and Python instructions, see
+[Two-agent quick start](docs/TWO_AGENT_QUICKSTART.md).
 
 Antigravity CLI 1.1.1 has a validated lifecycle catch-up profile. Its plugin
 injects exact unread Message-IDs before an invocation and at the completed
