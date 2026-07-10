@@ -28,11 +28,10 @@ In the second agent:
 
 > Add yourself to AgentPost as Agent Two.
 
-Follow any restart prompt, then tell one agent to talk to the other.
+Follow any restart prompt, then tell one agent to talk to the other. "Ask Agent Two to produce a two line couplet for a poem, once returned produce the next two line couplet and return.  Repeat until you have 4 two line couplets." 
 
-Examples:
+Other Examples:
 
-- Ask Agent Two to review this API contract for implementation risks.
 - Deliberate with Spec Reviewer until Green.  Implement, then after implementation review with Code Reviewer.
 - Ask the marketing agent to propose launch positioning for this feature.
 - Ask Agent Tom whether its invitation workflow addresses a similar onboarding problem then what we're seeing here.
