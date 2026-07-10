@@ -82,6 +82,11 @@ Lifecycle-only fallback hooks acquire the lease for one hook event because
 their host exposes no session-lifetime attachment point; atomic message claim
 remains the final exclusion boundary on that degraded path.
 
+The low-level `watch` command is intentionally an unleased observer feed: two
+watchers may emit the same pointer. Hosts must treat Message-ID as the
+idempotency key and claim before work; use a native adapter or `AgentRuntime`
+when single-consumer notification ownership is required.
+
 Directory search and role/project/specialty selectors exclude offline agents by
 default. Exact mailbox names and explicit named groups may target offline
 agents. Delivery still commits to `unread/`; only notification is unavailable.

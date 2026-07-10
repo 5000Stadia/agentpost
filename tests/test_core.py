@@ -140,6 +140,21 @@ class PostOfficeTest(unittest.TestCase):
         self.assertTrue(any("profile cx" in action for action in actions))
         self.assertTrue(any("default cx" in action for action in actions))
 
+    def test_migrate_refuses_to_guess_an_ambiguous_legacy_workspace_default(self) -> None:
+        project = Path(self.temp.name) / "ambiguous-legacy"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        self.office.bind_agent("k", "claude", project)
+        (project / ".agentpost.toml").unlink()
+
+        actions = self.office.migrate()
+
+        self.assertFalse((project / ".agentpost.toml").exists())
+        self.assertIn(
+            f"workspace {project}: skipped ambiguous defaults cx, k",
+            actions,
+        )
+
     def test_connection_mode_round_trips_without_losing_groups(self) -> None:
         self.office.set_group("team", ("cx", "k"))
         self.office.set_connection_mode("manual")
