@@ -174,6 +174,9 @@ agentpost reply MESSAGE_ID 'answer'
 
 The sender is inferred like `message` and `question`. The legacy
 `reply AGENT MESSAGE_ID` form remains accepted for scripts during migration.
+Replies to questions default to immediate notification because an answer is
+awaited; replies to ordinary letters default to idle. Use `--notify` to
+override either case.
 
 Named groups, comma-separated recipients, and selectors such as
 `@role:marketing`, `@project:construct`, and `@specialty:temporal-identity` are

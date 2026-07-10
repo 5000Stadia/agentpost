@@ -209,6 +209,10 @@ lower-level `send` and `ask` forms remain for scripts that already hold
 canonical sender and mailbox keys. Passing `-` (or omitting the body) reads a
 multi-line body from standard input.
 
+Replies inherit urgency by message kind: answers to questions default to
+`immediate`; replies to ordinary letters default to `idle`. `--notify` remains
+an explicit override.
+
 ## How waiting works
 
 No model call, prompt loop, or polling conversation runs while an agent is
@@ -237,6 +241,10 @@ Presence is derived from adapter heartbeats:
 - `working`: a connected CLI has an active turn;
 - `idle`: a connected CLI is available between turns;
 - `offline`: no live adapter heartbeat exists.
+
+Live adapters heartbeat every second and remain present through a five-second
+freshness window, avoiding transient discovery flaps from brief scheduler or
+filesystem stalls.
 
 The `identities` header labels this column `attention`: `offline` means the
 notifier is not currently armed, not that the durable identity or mailbox is

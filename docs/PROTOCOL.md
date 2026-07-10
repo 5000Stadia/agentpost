@@ -70,7 +70,10 @@ path-like agent names are rejected.
 Presence is transient adapter data under `agents/AGENT/adapter/`, never part of
 the profile or message protocol. A fresh live heartbeat yields `idle` or
 `working`; no heartbeat yields `offline`. Presence probes aggregate live
-adapter markers rather than dispatching from a profile's CLI type.
+adapter markers rather than dispatching from a profile's CLI type. Periodic
+adapters heartbeat every second; markers expire after five seconds. Legacy
+PID-only Codex markers are bounded by file modification time, so PID reuse
+cannot create permanent false presence.
 
 One mailbox-wide `flock` on `consumer.lock` owns inbound notification and
 consumption across every adapter type. `consumer.json` identifies the runtime

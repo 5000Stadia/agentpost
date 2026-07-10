@@ -15,6 +15,7 @@ from pathlib import Path
 from .adapters import MailboxWatcher
 from .core import AgentPostError, PostOffice
 from .ownership import ConsumerLease
+from .presence import HEARTBEAT_INTERVAL_SECONDS
 from .routing import identify_agent
 
 
@@ -66,7 +67,7 @@ def claude_monitor() -> int:
                     continue
             now = time.time()
             state = _claude_boundary_state()
-            if now - last_heartbeat >= 1.0:
+            if now - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
                 _atomic_json(
                     marker,
                     {

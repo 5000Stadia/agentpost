@@ -19,6 +19,7 @@ from .adapters import MailboxWatcher
 from .channel import AgentChannel
 from .core import AgentPostError, MessageRecord, PostOffice
 from .ownership import ConsumerLease
+from .presence import HEARTBEAT_INTERVAL_SECONDS
 
 
 logger = logging.getLogger(__name__)
@@ -210,7 +211,7 @@ class AgentRuntime:
                         continue
                     self._write_heartbeat()
                 now = time.time()
-                if now - last_heartbeat >= 1.0:
+                if now - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
                     self._write_heartbeat()
                     last_heartbeat = now
                 self._prune_callback_exhaustion()

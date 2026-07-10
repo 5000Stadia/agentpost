@@ -116,6 +116,7 @@ class JoinCommandTest(unittest.TestCase):
         reply = self.office.list_messages("pb")[0].letter
         self.assertEqual(reply.body, body)
         self.assertEqual(reply.in_reply_to, request.message_id)
+        self.assertEqual(reply.notify, "idle")
 
     def test_reply_infers_sender_from_workspace_identity(self) -> None:
         request = self.office.send("pb", "app", "Please review this.")
@@ -134,6 +135,25 @@ class JoinCommandTest(unittest.TestCase):
         reply = self.office.list_messages("pb")[0].letter
         self.assertEqual(reply.from_agent, "app")
         self.assertEqual(reply.in_reply_to, request.message_id)
+        self.assertEqual(reply.notify, "idle")
+
+    def test_reply_to_question_defaults_to_immediate_notification(self) -> None:
+        request = self.office.send(
+            "pb", "app", "Are these semantics correct?", kind="question"
+        )
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "reply",
+                        request.message_id,
+                        "Yes.",
+                    ]
+                )
+        self.assertEqual(result, 0)
+        self.assertEqual(self.office.list_messages("pb")[0].letter.notify, "immediate")
 
     def test_optional_channel_bodies_may_follow_flags(self) -> None:
         request = self.office.send("pb", "app", "Please reply.")

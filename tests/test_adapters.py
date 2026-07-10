@@ -257,6 +257,14 @@ lease.release()
         )
         self.assertEqual(agent_presence(office, "cx").state, "working")
 
+    def test_legacy_codex_pid_marker_expires_by_file_age(self) -> None:
+        office = self.office()
+        marker = _codex_bridge_marker(office, "cx")
+        marker.write_text(f"{os.getpid()}\n", encoding="ascii")
+        self.assertEqual(agent_presence(office, "cx").state, "idle")
+        os.utime(marker, (0, 0))
+        self.assertEqual(agent_presence(office, "cx").state, "offline")
+
     def test_install_records_project_binding(self) -> None:
         office = self.office()
         project = Path(self.temp.name) / "project"

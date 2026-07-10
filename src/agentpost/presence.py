@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from .core import AgentPostError, PostOffice
 
 
+HEARTBEAT_INTERVAL_SECONDS = 1.0
+PRESENCE_TIMEOUT_SECONDS = 5.0
+
+
 @dataclass(frozen=True)
 class Presence:
     state: str
@@ -75,7 +79,7 @@ def agent_presence(office: PostOffice, agent: str) -> Presence:
 
 def _claude_presence(adapter) -> Presence:
     live = []
-    cutoff = time.time() - 3.0
+    cutoff = time.time() - PRESENCE_TIMEOUT_SECONDS
     for marker in sorted(adapter.glob("claude-monitor-*.json")):
         try:
             value = json.loads(marker.read_text(encoding="utf-8"))
@@ -117,16 +121,22 @@ def _codex_presence(adapter) -> Presence:
         updated_at = float(value["updated_at"])
         state = str(value.get("state", "idle"))
         instance_id = value.get("instance_id")
-        fresh = updated_at >= time.time() - 3.0
+        fresh = updated_at >= time.time() - PRESENCE_TIMEOUT_SECONDS
     except (ValueError, TypeError, KeyError, json.JSONDecodeError):
         try:
             pid = int(raw)
         except ValueError:
             pid = 0
-        updated_at = None
+        try:
+            updated_at = marker.stat().st_mtime
+        except OSError:
+            updated_at = None
         state = "idle"
         instance_id = None
-        fresh = True
+        fresh = bool(
+            updated_at is not None
+            and updated_at >= time.time() - PRESENCE_TIMEOUT_SECONDS
+        )
     if not (fresh and _pid_alive(pid)):
         return Presence("offline", "Codex bridge is not live", adapter="codex")
     resolved = "working" if state in {"busy", "working"} else "idle"
@@ -145,7 +155,7 @@ def _codex_presence(adapter) -> Presence:
 
 def _python_presence(adapter) -> Presence:
     live = []
-    cutoff = time.time() - 3.0
+    cutoff = time.time() - PRESENCE_TIMEOUT_SECONDS
     for marker in sorted(adapter.glob("python-runtime-*.json")):
         try:
             value = json.loads(marker.read_text(encoding="utf-8"))
@@ -189,7 +199,7 @@ def _antigravity_presence(adapter) -> Presence:
         instance_id = value.get("instance_id")
     except (OSError, ValueError, KeyError, json.JSONDecodeError):
         return Presence("offline", "Antigravity hook is not live", adapter="antigravity")
-    if updated_at < time.time() - 3.0:
+    if updated_at < time.time() - PRESENCE_TIMEOUT_SECONDS:
         return Presence(
             "offline",
             "Antigravity hook is not live",

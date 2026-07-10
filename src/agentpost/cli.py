@@ -227,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="MESSAGE_ID [BODY], or legacy AGENT MESSAGE_ID [BODY]",
     )
     reply.add_argument("--from", dest="sender")
-    reply.add_argument("--notify", choices=("idle", "immediate"), default="immediate")
+    reply.add_argument("--notify", choices=("idle", "immediate"))
 
     native_claude_boundary = commands.add_parser("internal-claude-boundary")
     native_claude_boundary.add_argument("state", choices=("busy", "idle"))
@@ -511,12 +511,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
         elif args.command == "reply":
             replier, message_id, body = _reply_parts(office, args.parts, args.sender)
-            recipient = office.read(replier, message_id).letter.from_agent
+            original = office.read(replier, message_id).letter
+            recipient = original.from_agent
+            notify = args.notify or (
+                "immediate" if original.kind == "question" else "idle"
+            )
             result = office.reply(
                 replier,
                 message_id,
                 _channel_body(body),
-                notify=args.notify,
+                notify=notify,
             )
             print(result.message_id)
             _warn_unarmed(office, (recipient,))
