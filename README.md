@@ -13,6 +13,7 @@ project, represent a cross-project role such as code review or marketing, serve
 as a specialist, or combine those shapes.
 
 ## Quick Start
+Send your agent here.
 
 ### Get two agents talking
 
