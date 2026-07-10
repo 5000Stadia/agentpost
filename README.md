@@ -18,7 +18,7 @@ as a specialist, or combine those shapes.
 curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
 ```
 ### Get two agents talking
-To the first agent: "Add yourself to AgentPost as Agent One."
+To the first agent: ```sh"Add yourself to AgentPost as Agent One."```
 
 To the second agent: "Add yourself to AgentPost as Agent Two."
 
