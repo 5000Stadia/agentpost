@@ -15,13 +15,14 @@ the message, and reports its durable Message-ID and live/queued state.
 Install AgentPost once:
 
 ```sh
-python3 -m venv ~/.local/share/agentpost/venv
-~/.local/share/agentpost/venv/bin/pip install \
-  git+https://github.com/5000Stadia/agentpost.git
-mkdir -p ~/.local/bin
-ln -sf ~/.local/share/agentpost/venv/bin/agentpost ~/.local/bin/agentpost
-agentpost init --connection-mode auto
+curl -fsSL \
+  https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
 ```
+
+The installer is idempotent, upgrades the dedicated virtual environment under
+`~/.local/share/agentpost`, preserves `~/.agentpost`, and links the command into
+`~/.local/bin`. Set `AGENTPOST_CONNECTION_MODE=manual` before the command to
+disable automatic known-project reconnection.
 
 Open the first project in Claude Code, Codex, or Antigravity CLI and say:
 

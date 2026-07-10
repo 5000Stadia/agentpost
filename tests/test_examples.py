@@ -14,6 +14,13 @@ ROOT = Path(__file__).parents[1]
 
 
 class DocumentationExampleTest(unittest.TestCase):
+    def test_bootstrap_installer_is_valid_posix_shell(self) -> None:
+        subprocess.run(
+            ["sh", "-n", str(ROOT / "scripts" / "install.sh")],
+            cwd=ROOT,
+            check=True,
+        )
+
     def test_antigravity_plugin_uses_the_shared_skill_and_valid_hooks(self) -> None:
         shared = ROOT / "integrations" / "shared" / "agentpost" / "SKILL.md"
         generated = (

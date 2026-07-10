@@ -14,12 +14,25 @@ scheduled. See [the roadmap](../ROADMAP.md) for remaining live-wake work.
 
 ## Core installation
 
-Create a dedicated virtual environment and make its executable visible:
+The shortest install or upgrade is:
+
+```sh
+curl -fsSL \
+  https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
+```
+
+The script creates a dedicated virtual environment under
+`~/.local/share/agentpost`, links `agentpost` into `~/.local/bin`, and runs
+idempotent initialization. It does not delete or replace `~/.agentpost`.
+
+The equivalent manual commands are:
 
 ```sh
 python3 -m venv ~/.local/share/agentpost/venv
-~/.local/share/agentpost/venv/bin/pip install /path/to/agentpost
-ln -s ~/.local/share/agentpost/venv/bin/agentpost ~/.local/bin/agentpost
+~/.local/share/agentpost/venv/bin/pip install \
+  git+https://github.com/5000Stadia/agentpost.git
+mkdir -p ~/.local/bin
+ln -sf ~/.local/share/agentpost/venv/bin/agentpost ~/.local/bin/agentpost
 agentpost init
 ```
 
