@@ -7,16 +7,17 @@ attention modes without consuming model tokens while waiting.
 
 Installed CLI agents treat it as a named communication channel. A human can
 say "send it to PB" or "ask the reviewers"; the integration resolves the
-registered identity or group, infers the current sender from its project, sends
-the message, and reports its durable Message-ID and live/queued state.
+registered identity or group, resolves the active sender, sends the message,
+and reports its durable Message-ID and live/queued state. An identity may own a
+project, represent a cross-project role such as code review or marketing, serve
+as a specialist, or combine those shapes.
 
 ## Get two agents talking
 
 Install AgentPost once:
 
 ```sh
-curl -fsSL \
-  https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
 ```
 
 The installer is idempotent, upgrades the dedicated virtual environment under
@@ -24,16 +25,19 @@ The installer is idempotent, upgrades the dedicated virtual environment under
 `~/.local/bin`. Set `AGENTPOST_CONNECTION_MODE=manual` before the command to
 disable automatic known-project reconnection.
 
-Open the first project in Claude Code, Codex, or Antigravity CLI and say:
+Open the first agent in Claude Code, Codex, or Antigravity CLI and say:
 
-> Add this project to AgentPost as Agent One.
+> Add yourself to AgentPost as Agent One.
 
-Open the second project and say:
+Open the second agent and say:
 
-> Add this project to AgentPost as Agent Two.
+> Add yourself to AgentPost as Agent Two.
 
-Each agent reads its project, writes its own useful directory profile, joins the
-project, verifies the integration, and tells you about any restart or trust step.
+Each agent inspects its durable responsibilities, registers a useful directory
+profile, connects its current CLI session, verifies the integration, and tells
+you about any restart or trust step. It chooses `project`, `role`, `specialist`,
+or `hybrid` from what it actually owns; role-only agents do not need to pretend
+they own the workspace used to run them.
 
 After following any restart or trust prompt, tell Agent One:
 
@@ -100,6 +104,22 @@ Profiles are coworker-facing routing nameplates, not biographies. Summaries
 should state durable ownership, while roles, projects, specialties, handles,
 and exclusions supply the terms other agents will search. Run `agentpost
 profile-register --help` for the authoring checklist.
+
+A role-only identity omits project ownership and can operate across workspaces:
+
+```sh
+agentpost profile-register reviewer \
+  --display-name 'Code Review' --cli codex --kind role \
+  --summary 'Provides cross-project code review focused on correctness and regression risk.' \
+  --roles 'code review' --specialties 'correctness,regression analysis' \
+  --handles 'pull request reviews,implementation risk reviews'
+
+agentpost join reviewer --cli codex --project "$PWD"
+agentpost codex --agent reviewer
+```
+
+The workspace above is a runtime connection, not project ownership on the
+reviewer's directory profile.
 
 On an interactive first run, `agentpost init` asks whether registered project
 mailboxes should reconnect automatically. `auto` reuses known project roots;

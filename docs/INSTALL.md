@@ -14,11 +14,10 @@ scheduled. See [the roadmap](../ROADMAP.md) for remaining live-wake work.
 
 ## Core installation
 
-The shortest install or upgrade is:
+The shortest install or upgrade is one line:
 
 ```sh
-curl -fsSL \
-  https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
 ```
 
 The script creates a dedicated virtual environment under
@@ -51,7 +50,9 @@ process opened.
 For a tested end-to-end example with two identities, two project bindings, and
 a correlated request/reply, start with [Two-agent quick start](TWO_AGENT_QUICKSTART.md).
 
-Mailbox declaration and process connection are separate operations.
+Mailbox declaration and process connection are separate operations. A mailbox
+may describe a project, role, specialist, or hybrid identity; only project and
+hybrid identities need to claim project ownership in their profile.
 `profile-register` creates or atomically updates the durable mailbox nameplate:
 
 ```sh

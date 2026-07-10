@@ -19,14 +19,14 @@ AP=("$AGENTPOST_BIN" --root "$POST_ROOT")
   --specialties "planning,requirements" \
   --handles "implementation briefs,requirements questions" >/dev/null
 "${AP[@]}" profile-register agent-two \
-  --display-name "Agent Two" --cli python --kind specialist \
-  --summary "Owns implementation review and checks briefs for engineering risk." \
-  --projects agent-two-project --project-roots "$AGENT_TWO_ROOT" \
+  --display-name "Agent Two" --cli python --kind role \
+  --summary "Provides cross-project implementation review and engineering risk analysis." \
+  --roles "code review" \
   --specialties "code review,engineering risk" \
   --handles "implementation reviews,risk analysis" >/dev/null
 
 (cd "$AGENT_ONE_ROOT" && "${AP[@]}" join >/dev/null)
-(cd "$AGENT_TWO_ROOT" && "${AP[@]}" join >/dev/null)
+(cd "$AGENT_TWO_ROOT" && "${AP[@]}" join agent-two --cli python >/dev/null)
 
 message_output="$({
   cd "$AGENT_ONE_ROOT"

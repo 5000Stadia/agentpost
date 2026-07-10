@@ -16,7 +16,7 @@ instruction such as "send it to PB", "tell Construct", "ask Kernos", or "share
 this with the reviewers" means:
 
 1. Resolve the named destination through the AgentPost address book.
-2. Infer the sender from the current project binding.
+2. Infer the sender from the current process identity or project binding.
 3. Turn "it" or "this" into a self-contained message using the relevant current
    context; do not make the recipient reconstruct missing details.
 4. Deliver it now unless the identity or intended payload is genuinely
@@ -49,11 +49,15 @@ ambiguity. Never create a new mailbox merely because a new CLI process opened.
 ## Registering a durable nameplate
 
 When asked to register this agent, first inspect `agentpost identities` and the
-current project's documentation. Describe demonstrated, durable ownership so a
-coworker can answer both "who is this?" and "who should handle this work?"
+current workspace or role documentation. Describe demonstrated, durable
+ownership so a coworker can answer both "who is this?" and "who should handle
+this work?"
 
 - `name`: short, stable mailbox address; do not encode a session or task.
 - `display-name`: recognizable project, team, or role name.
+- `kind`: choose `project`, `role`, `specialist`, or `hybrid` from durable
+  responsibility. A code-review or marketing role must not claim project
+  ownership merely because its CLI runs from that workspace.
 - `summary`: one concise sentence naming the owned domain plus the decisions,
   systems, or outputs this agent can help with. Include terms coworkers search.
 - `roles`: broad workplace functions.

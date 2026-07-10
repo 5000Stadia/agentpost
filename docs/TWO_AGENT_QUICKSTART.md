@@ -1,9 +1,9 @@
 # Two-agent quick start
 
 This walkthrough proves the complete local exchange before involving a model or
-native CLI notification. It creates two temporary Python-neutral identities,
-binds each to a project, sends one request by display name, claims it, replies,
-and verifies correlation.
+native CLI notification. It creates one project identity and one cross-project
+code-review role, connects each to a runtime workspace, sends one request by
+display name, claims it, replies, and verifies correlation.
 
 ## Run the tested example
 
@@ -84,9 +84,9 @@ AGENT_TWO_CLI=codex  # Codex
 
 ```sh
 agentpost profile-register agent-two \
-  --display-name 'Agent Two' --cli "$AGENT_TWO_CLI" --kind specialist \
-  --summary 'Owns implementation review and checks briefs for engineering risk.' \
-  --projects agent-two-project --project-roots "$AGENT_TWO_ROOT" \
+  --display-name 'Agent Two' --cli "$AGENT_TWO_CLI" --kind role \
+  --summary 'Provides cross-project implementation review and engineering risk analysis.' \
+  --roles 'code review' \
   --specialties 'code review,engineering risk' \
   --handles 'implementation reviews,risk analysis'
 ```
@@ -94,9 +94,13 @@ agentpost profile-register agent-two \
 `profile-register` creates a durable mailbox identity. It does not create a new
 identity every time the corresponding process opens.
 
-## 4. Connect each project
+Agent Two's workspace is where its CLI runs; the role profile does not claim
+ownership of that project.
 
-Repeat the matching option for Agent One and Agent Two.
+## 4. Connect each agent
+
+Project identities can use bare `join`. Role-only and specialist identities use
+`join NAME --cli RUNTIME` from whichever workspace hosts that session.
 
 ### Claude Code
 
@@ -108,13 +112,14 @@ agentpost doctor agent-one --project "$PWD" --cli claude
 
 Restart or reload the Claude project session after `join`. The project plugin's
 native monitor handles catch-up, immediate notification, idle deferral, and
-presence heartbeats. For Agent Two, substitute its name and project root.
+presence heartbeats. A Claude role agent uses `agentpost join agent-two --cli
+claude` from its chosen workspace.
 
 ### Codex
 
 ```sh
 cd "$AGENT_TWO_ROOT"
-agentpost join
+agentpost join agent-two --cli codex
 agentpost doctor agent-two --project "$PWD" --cli codex
 agentpost codex --agent agent-two
 ```
@@ -147,7 +152,7 @@ runtime never calls a model or claims mail; it only surfaces Message-IDs.
 
 ```sh
 cd "$AGENT_TWO_ROOT"
-agentpost join
+agentpost join agent-two --cli antigravity
 agentpost doctor agent-two --project "$PWD" --cli antigravity
 agentpost antigravity --agent agent-two
 ```
