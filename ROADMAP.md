@@ -9,6 +9,11 @@ non-goals.
 
 ## Active closeout
 
+The release gate is tracked in
+[`docs/FOUNDER_ACCEPTANCE_CHECKLIST.md`](docs/FOUNDER_ACCEPTANCE_CHECKLIST.md).
+It separates founder-observed behavior from agent-owned automation and rollback
+work; neither category may be silently waived.
+
 1. Reload the already-running K/PB/Construct Claude sessions onto the installed
    AgentPost 0.0.4 plugin generation, then re-run restart catch-up, immediate
    delivery, and idle deferral. The prior raw watcher and directory-polling
