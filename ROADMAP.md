@@ -74,6 +74,11 @@ but it is not scheduled.
   must be durable before this can work across process restarts.
 - **Machine-readable capability report:** expose adapter support and degraded
   behavior in structured output, especially for catch-up-only integrations.
+- **Claude session re-arm and upgrade truth:** determine whether an already-open
+  Claude session can attach the monitor after install; otherwise make the reload
+  boundary explicit, detect armed sessions running an older plugin generation,
+  and distinguish failed `immediate` interruption from routine queued delivery.
+  PB's long-lived unarmed session is the live acceptance fixture.
 - **Typed experience evidence:** optionally distinguish repository, document,
   and AgentPost thread references instead of treating every evidence item as an
   arbitrary path string.

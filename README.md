@@ -237,10 +237,12 @@ deliver to offline mailboxes, so queued specs and review requests are not lost.
 Python orchestrators can embed `AgentRuntime` instead of installing a
 CLI-specific plugin. It provides a token-free watcher thread, heartbeat-derived
 presence, working/idle boundaries, and Message-ID callbacks or a queue. Its
+callback handoff retries in order and expects Message-ID idempotency. Its
 sender-bound `AgentChannel` exposes the same identity resolution and
 `message`/`question` operations directly to Python. Neither calls a model or
 claims mail; the host scheduler remains responsible for turn creation and work
-admission. See [Python integration](docs/PYTHON.md).
+admission. Async hosts can await `runtime.get_async()` directly. See
+[Python integration](docs/PYTHON.md).
 
 ## Adapter capabilities
 

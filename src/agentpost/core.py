@@ -550,10 +550,15 @@ class PostOffice:
         if state not in {"unread", "read", "sent"}:
             raise ValueError(f"invalid mailbox state: {state}")
         directory = self._require_agent(agent) / state
-        return tuple(
-            MessageRecord(path, state, Letter.from_bytes(path.read_bytes()))
-            for path in sorted(directory.glob("*.md"))
-        )
+        records = []
+        for path in sorted(directory.glob("*.md")):
+            try:
+                content = path.read_bytes()
+            except FileNotFoundError:
+                # A concurrent claim may rename an unread entry after globbing.
+                continue
+            records.append(MessageRecord(path, state, Letter.from_bytes(content)))
+        return tuple(records)
 
     def read(
         self,
@@ -569,7 +574,12 @@ class PostOffice:
                 raise ValueError(f"invalid mailbox state: {state}")
             path = self._find_token(agent_dir, token, (state,))
             if path:
-                letter = Letter.from_bytes(path.read_bytes())
+                try:
+                    content = path.read_bytes()
+                except FileNotFoundError:
+                    # An unread entry may move to read between lookup and read.
+                    continue
+                letter = Letter.from_bytes(content)
                 if letter.message_id == message_id:
                     return MessageRecord(path, state, letter)
         raise MessageNotFoundError(f"message not found for {agent}: {message_id}")

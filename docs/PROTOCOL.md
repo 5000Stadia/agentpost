@@ -66,7 +66,13 @@ or the deepest current project binding.
 
 Python applications expose the same presence contract through
 `AgentRuntime`. Its callback/queue receives Message-IDs only and does not alter
-the `unread -> read` lifecycle.
+the `unread -> read` lifecycle. Synchronous callback failures are retried in
+order with capped backoff while the affected mail remains unread; callback
+consumers must use Message-ID as their idempotency key. A successful callback
+acknowledges host-queue admission only, not completion or claim of the work.
+After the bounded attempt count, adapter health reports the still-unread
+exhausted IDs; hosts can reconcile them through `AgentRuntime.unread()` without
+adding a mailbox acknowledgment state.
 
 Delivery writes and fsyncs a temporary file, atomically renames it into each
 recipient's `unread/`, and writes the sender archive. Fanout uses one logical

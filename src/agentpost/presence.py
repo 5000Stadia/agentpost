@@ -13,6 +13,7 @@ class Presence:
     state: str
     detail: str
     updated_at: float | None = None
+    healthy: bool = True
 
     @property
     def active(self) -> bool:
@@ -97,18 +98,22 @@ def _python_presence(adapter) -> Presence:
             pid = int(value["pid"])
             updated_at = float(value["updated_at"])
             state = str(value.get("state", "idle"))
+            exhausted = tuple(value.get("callback_exhausted", ()))
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             continue
         if updated_at >= cutoff and _pid_alive(pid):
-            live.append((state, updated_at, pid))
+            live.append((state, updated_at, pid, exhausted))
     if not live:
         return Presence(
             "offline",
             "Python runtime not attached; embed `agentpost.AgentRuntime`",
         )
     working = [item for item in live if item[0] == "working"]
-    state, updated_at, pid = max(working or live, key=lambda item: item[1])
-    return Presence(state, f"Python runtime pid {pid}", updated_at)
+    state, updated_at, pid, exhausted = max(working or live, key=lambda item: item[1])
+    detail = f"Python runtime pid {pid}"
+    if exhausted:
+        detail += f"; callback exhausted for {len(exhausted)} unread message(s)"
+    return Presence(state, detail, updated_at, healthy=not exhausted)
 
 
 def _antigravity_presence(adapter) -> Presence:

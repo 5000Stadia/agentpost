@@ -7,6 +7,7 @@ import threading
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
@@ -157,6 +158,43 @@ class PostOfficeTest(unittest.TestCase):
         self.assertEqual(before.st_ino, after.st_ino)
         self.assertEqual(before.st_mtime_ns, after.st_mtime_ns)
         self.assertEqual(len(self.office.list_messages("k", "read")), 0)
+
+    def test_list_tolerates_a_concurrent_claim_after_directory_scan(self) -> None:
+        sent = self.office.send("cx", "k", "claimed during list")
+        source = self.office.read("k", sent.message_id).path
+        destination = source.parent.parent / "read" / source.name
+        original_read_bytes = Path.read_bytes
+        moved = False
+
+        def racing_read_bytes(path: Path) -> bytes:
+            nonlocal moved
+            if path == source and not moved:
+                moved = True
+                os.replace(source, destination)
+            return original_read_bytes(path)
+
+        with patch("pathlib.Path.read_bytes", new=racing_read_bytes):
+            self.assertEqual(self.office.list_messages("k"), ())
+        self.assertEqual(len(self.office.list_messages("k", "read")), 1)
+
+    def test_read_follows_a_message_claimed_during_inspection(self) -> None:
+        sent = self.office.send("cx", "k", "claimed during read")
+        source = self.office.read("k", sent.message_id).path
+        destination = source.parent.parent / "read" / source.name
+        original_read_bytes = Path.read_bytes
+        moved = False
+
+        def racing_read_bytes(path: Path) -> bytes:
+            nonlocal moved
+            if path == source and not moved:
+                moved = True
+                os.replace(source, destination)
+            return original_read_bytes(path)
+
+        with patch("pathlib.Path.read_bytes", new=racing_read_bytes):
+            record = self.office.read("k", sent.message_id)
+        self.assertEqual(record.state, "read")
+        self.assertEqual(record.letter.message_id, sent.message_id)
 
     def test_claim_moves_exactly_one_message(self) -> None:
         result = self.office.send("cx", "k", "hello")

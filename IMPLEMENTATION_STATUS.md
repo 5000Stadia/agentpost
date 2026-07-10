@@ -52,7 +52,8 @@ or the original data directories.
   Claude/Codex launchers.
 - CLI-neutral `AgentRuntime` for Python agent systems: token-free watcher
   thread, single-owner heartbeat, working/idle boundaries, callback/queue
-  delivery, and non-claiming restart catch-up.
+  delivery, ordered callback retry with visible exhaustion, async consumption,
+  unread reconciliation, and non-claiming restart catch-up.
 - Human-facing channel addressing with an inspectable identity directory,
   ambiguity-safe name/display/project/responsibility resolution, inferred
   senders, natural named groups, and live-versus-queued delivery receipts.
@@ -78,7 +79,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 77 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 83 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 

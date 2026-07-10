@@ -11,7 +11,8 @@ The runtime owns only transport concerns:
 - immediate delivery while working;
 - idle-message deferral until the next idle boundary;
 - complete unread catch-up whenever it starts;
-- immutable Message-ID notifications through a callback and queue.
+- immutable Message-ID notifications through a callback and queue;
+- ordered, at-least-once callback handoff with capped retry backoff.
 
 It never calls an LLM, claims a letter, or decides how to schedule work.
 
@@ -41,8 +42,11 @@ there is no Claude/Codex plugin to install.
 
 ## Embed the runtime
 
-The callback runs on AgentPost's watcher thread. It should enqueue lightweight
-events into the host scheduler rather than call a model directly:
+The callback runs on AgentPost's watcher thread. It should synchronously enqueue
+lightweight events into the host scheduler rather than call a model directly.
+If it raises, AgentPost retries the still-unread part of that batch in order
+with capped exponential backoff. The enqueue operation must therefore be
+idempotent by Message-ID:
 
 ```python
 from agentpost import AgentRuntime
@@ -53,6 +57,7 @@ def enqueue_agentpost(batch):
         scheduler.enqueue_external(
             kind="agentpost.mail",
             message_id=notice.message_id,
+            idempotency_key=notice.message_id,
             priority="urgent" if notice.notify == "immediate" else "normal",
         )
 
@@ -102,6 +107,21 @@ waits until that boundary. Immediate mail is surfaced to the callback while
 work is active, but the host still decides whether and how to interrupt its
 current turn.
 
+A successful callback means only that the host accepted the notification into
+its own scheduler or bridge queue. Failures after that boundary belong to the
+host's retry policy. The host must deduplicate by Message-ID and leave the mail
+unclaimed until the queued turn actually begins.
+
+Callback handoff defaults to eight attempts. Exhausted Message-IDs remain
+unread, are reported as unhealthy by `status` and `armed`, and are available
+through the side-effect-free `runtime.unread()` reconciliation snapshot. This
+is adapter health, not a third mailbox state or an acknowledgment protocol.
+
+**Recovery rule:** after the host scheduler or its bridge queue recovers without
+restarting `AgentRuntime`, reconcile `runtime.unread()` before trusting callback
+delivery alone. Hosts with expected multi-minute outages should increase
+`max_callback_attempts` when constructing the runtime.
+
 Applications that prefer blocking consumption can omit the callback and read
 notification batches from the runtime queue:
 
@@ -109,6 +129,16 @@ notification batches from the runtime queue:
 with AgentRuntime("kernos-runtime") as runtime:
     batch = runtime.get(timeout=30)
 ```
+
+Async hosts can use the same queue without watcher-thread callback plumbing:
+
+```python
+async with AgentRuntime("kernos-runtime") as runtime:
+    batch = await runtime.get_async(timeout=30)
+```
+
+Closing the runtime unblocks pending synchronous and asynchronous queue readers
+with `AgentPostError`; they do not remain hung during host shutdown.
 
 ## Processing a notification
 
@@ -150,9 +180,8 @@ thin rather than introduce another scheduler:
 1. Start one `AgentRuntime` after `MessageHandler` and the event stream are live
    in application bring-up. Close it beside `shutdown_runners()` and the event
    stream writer during teardown.
-2. Capture Kernos's asyncio loop at startup. The AgentPost callback runs on a
-   watcher thread, so bridge into the loop with `loop.call_soon_threadsafe` and
-   schedule a coroutine; never call Kernos or an LLM directly from that thread.
+2. Use `runtime.get_async()` in an asyncio pump. This consumes the runtime queue
+   directly without running Kernos code on the watcher thread.
 3. Add an `inject_agentpost_wake()` method shaped like Kernos's existing
    `MessageHandler.inject_consult_completion_wake()`. It should enqueue a
    synthetic `NormalizedMessage` onto the existing per-space `SpaceRunner`
@@ -170,18 +199,18 @@ thin rather than introduce another scheduler:
 The callback bridge has this shape:
 
 ```python
-loop = asyncio.get_running_loop()
-
-
-def enqueue_agentpost(batch):
-    for notice in batch:
-        loop.call_soon_threadsafe(
-            asyncio.create_task,
-            handler.inject_agentpost_wake(notice, target=agentpost_target),
-        )
+async def pump_agentpost():
+    while True:
+        batch = await runtime.get_async()
+        for notice in batch:
+            await handler.inject_agentpost_wake(
+                notice,
+                target=agentpost_target,
+            )
 ```
 
-This uses Kernos's existing external-wake and per-space serialization design.
-AgentPost remains transport and presence; Kernos remains the authority on
-member, space, disclosure, scheduling, and whether a surfaced message warrants
-an LLM turn.
+The production pump must deduplicate by `notice.message_id`, retry failed
+injections without reordering them, and shut down beside the runtime. This uses
+Kernos's existing external-wake and per-space serialization design. AgentPost
+remains transport and presence; Kernos remains the authority on member, space,
+disclosure, scheduling, and whether a surfaced message warrants an LLM turn.

@@ -155,7 +155,7 @@ def armed(office: PostOffice, agent: str) -> tuple[bool, str]:
             "Antigravity lifecycle catch-up only; already-idle external wake unsupported",
         )
     value = agent_presence(office, agent)
-    return value.active, value.detail
+    return value.active and value.healthy, value.detail
 
 
 def _doctor_claude(project: Path) -> tuple[Check, ...]:
