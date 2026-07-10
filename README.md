@@ -12,8 +12,8 @@ and reports its durable Message-ID and live/queued state. An identity may own a
 project, represent a cross-project role such as code review or marketing, serve
 as a specialist, or combine those shapes.
 
-## Quick Start (You can just send your agent here)
-
+## Quick Start
+(Direct your agent here to easily install)
 ### Get two agents talking
 
 ```sh
