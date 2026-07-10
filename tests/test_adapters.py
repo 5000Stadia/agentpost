@@ -30,7 +30,7 @@ from agentpost.native import (  # noqa: E402
     codex_hook,
     codex_snapshot,
 )
-from agentpost.installer import armed, install  # noqa: E402
+from agentpost.installer import _integration_source, armed, doctor, install  # noqa: E402
 from agentpost.presence import agent_presence  # noqa: E402
 
 
@@ -302,6 +302,7 @@ class AdapterTest(unittest.TestCase):
             [call.args[0] for call in run.call_args_list],
             [
                 ["agy", "plugin", "validate", str(project)],
+                ["agy", "plugin", "uninstall", "agentpost"],
                 ["agy", "plugin", "install", str(project)],
             ],
         )
@@ -335,6 +336,41 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(command, ["agy", "--model", "auto"])
         self.assertEqual(environment["AGENTPOST_AGENT"], "ag")
 
+    def test_packaged_integration_replaces_its_generated_cache(self) -> None:
+        home = Path(self.temp.name) / "home"
+        destination = home / ".local/share/agentpost/integrations/antigravity"
+        stale = destination / "removed/component.json"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("obsolete", encoding="utf-8")
+        fake_module = Path(self.temp.name) / "installed/agentpost/installer.py"
+        with patch("agentpost.installer.__file__", str(fake_module)):
+            with patch("agentpost.installer.Path.home", return_value=home):
+                resolved = _integration_source("antigravity")
+        self.assertEqual(resolved, destination)
+        self.assertFalse(stale.exists())
+        self.assertTrue((destination / "hooks.json").is_file())
+
+    def test_doctor_honors_explicit_agent_in_a_shared_workspace(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "shared-project"
+        project.mkdir()
+        for name in ("first", "second"):
+            office.register_profile(
+                Profile(
+                    name=name,
+                    display_name=name.title(),
+                    cli="antigravity",
+                    kind="role",
+                    summary=f"Role {name}",
+                    roles=("review",),
+                )
+            )
+            office.bind_agent(name, "antigravity", project)
+        with patch("agentpost.installer._doctor_antigravity", return_value=()):
+            checks = doctor(office, "second", project, cli="antigravity")
+        identity = next(check for check in checks if check.name == "identity")
+        self.assertTrue(identity.ok)
+        self.assertEqual(identity.detail, "resolved second")
 
 if __name__ == "__main__":
     unittest.main()

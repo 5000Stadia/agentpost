@@ -98,6 +98,25 @@ class JoinCommandTest(unittest.TestCase):
         self.assertEqual(record.letter.from_agent, "app")
         self.assertEqual(record.letter.body, "Please inspect the world model.")
 
+    def test_reply_reads_a_dash_body_from_stdin(self) -> None:
+        request = self.office.send("pb", "app", "Please review this.")
+        body = "Substantive review response.\nSecond line.\n"
+        with patch("sys.stdin", StringIO(body)), redirect_stdout(StringIO()):
+            result = main(
+                [
+                    "--root",
+                    str(self.root),
+                    "reply",
+                    "app",
+                    request.message_id,
+                    "-",
+                ]
+            )
+        self.assertEqual(result, 0)
+        reply = self.office.list_messages("pb")[0].letter
+        self.assertEqual(reply.body, body)
+        self.assertEqual(reply.in_reply_to, request.message_id)
+
     def test_identities_and_resolve_expose_the_address_book(self) -> None:
         identities = StringIO()
         with redirect_stdout(identities):

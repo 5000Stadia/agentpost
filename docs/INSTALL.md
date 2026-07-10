@@ -206,10 +206,13 @@ project root. The plugin uses `PreInvocation` and `Stop` hooks to inject exact
 unread Message-IDs without claiming them. It supports startup/next-prompt
 catch-up and completed-turn idle delivery.
 
-Antigravity 1.1.1 does not expose a documented external prompt edge that can
-wake an already-idle TUI. `doctor` therefore reports the profile as lifecycle
-catch-up, and senders conservatively see delivery as queued. Do not compensate
-with terminal keystroke injection or a duplicate message channel.
+Antigravity documents plugin sidecars and `agentapi` for its IDE/App surfaces,
+but live CLI 1.1.1 acceptance showed that an installed, enabled, schema-valid
+plugin sidecar does not start: no sidecar process, runtime data, or
+`SidecarManager` initialization appears. `doctor` therefore reports the CLI
+profile as lifecycle catch-up, and senders conservatively see delivery as
+queued. Do not compensate with terminal keystroke injection or a duplicate
+message channel.
 
 ## Recovery
 

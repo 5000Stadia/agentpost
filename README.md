@@ -75,9 +75,10 @@ Antigravity, and Python instructions, see
 
 Antigravity CLI 1.1.1 has a validated lifecycle catch-up profile. Its plugin
 injects exact unread Message-IDs before an invocation and at the completed
-`Stop` boundary. Antigravity does not currently document an external input edge
-for waking a TUI that is already idle, so AgentPost reports those deliveries as
-queued until the next prompt or lifecycle boundary. Launch it with `agentpost
+`Stop` boundary. Antigravity's documented sidecar API can wake conversations on
+its IDE/App surfaces, but a valid enabled plugin sidecar does not start under
+Antigravity CLI 1.1.1. AgentPost therefore reports CLI deliveries as queued
+until the next prompt or lifecycle boundary. Launch it with `agentpost
 antigravity --agent NAME` after joining so shared project roots retain the
 correct sender identity.
 

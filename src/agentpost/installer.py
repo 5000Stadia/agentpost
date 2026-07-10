@@ -60,9 +60,13 @@ def install(office: PostOffice, cli: str, agent: str, project: Path) -> None:
             cwd=project,
         )
         _run(
+            ["agy", "plugin", "uninstall", "agentpost"],
+            cwd=project,
+            allow_missing=True,
+        )
+        _run(
             ["agy", "plugin", "install", str(source)],
             cwd=project,
-            allow_already=True,
         )
     else:
         raise AgentPostError(f"unsupported installer: {cli}")
@@ -112,7 +116,7 @@ def doctor(
         Check("executable", shutil.which("agentpost") is not None, shutil.which("agentpost") or "not found"),
     ]
     try:
-        profile = identify_agent(office, project, cli=cli)
+        profile = identify_agent(office, project, cli=cli, agent=agent)
         checks.append(Check("identity", profile.name == agent, f"resolved {profile.name}"))
     except (AgentPostError, OSError, ValueError) as exc:
         checks.append(Check("identity", False, str(exc)))
@@ -248,6 +252,8 @@ def _integration_source(cli: str) -> Path:
     selected = {name[len(prefix):]: content for name, content in bundle.items() if name.startswith(prefix)}
     if not selected:
         raise AgentPostError(f"packaged integration templates are missing for {cli}")
+    if destination.exists():
+        shutil.rmtree(destination)
     for relative, content in selected.items():
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -78,7 +78,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 74 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 77 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 
@@ -90,12 +90,16 @@ Live acceptance passed on Claude Code 2.1.206 and Codex CLI 0.144.1. Claude
 proved restart catch-up, already-idle wake, and busy-turn idle deferral. Codex
 proved restart catch-up, active-turn immediate steering, a distinct post-turn
 idle notification, bridge/fallback-hook exclusion, and child-state cleanup.
+Antigravity CLI 1.1.1 proved plugin loading, exact next-prompt catch-up, claim,
+and correlated reply. Its documented sidecar shape was also installed and
+enabled experimentally, but the CLI did not initialize `SidecarManager` or
+start the process; the integration therefore retains truthful lifecycle-only
+delivery.
 
 ## Not yet implemented
 
-- Antigravity CLI live model acceptance and a supported already-idle external
-  wake edge. Plugin validation and isolated install/reinstall/uninstall pass on
-  `agy 1.1.1`; lifecycle catch-up is implemented.
+- Antigravity CLI already-idle external wake. The IDE/App sidecar mechanism did
+  not run on CLI 1.1.1; lifecycle catch-up is the accepted CLI behavior.
 - Opt-in live doctor automation, final rollback acceptance, and an automated
   clean-install matrix.
 - Durable panel-completion notification and machine-readable adapter

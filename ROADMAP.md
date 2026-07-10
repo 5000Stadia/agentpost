@@ -20,17 +20,18 @@ non-goals.
    only installer-owned integration state while retaining mail, profiles,
    bindings, and unrelated CLI configuration.
 
-## Next integration: Antigravity CLI
+## Antigravity CLI integration
 
 Google ended consumer-account access to Gemini CLI on June 18, 2026 and directs
 those users to Antigravity CLI (`agy`). Gemini CLI remains available to some
 Standard and Enterprise customers, but it is no longer AgentPost's primary
 Google integration target.
 
-The Antigravity track is active. The local `agy 1.1.1` installation is ready
-for the first user-driven live acceptance.
+The Antigravity lifecycle profile is implemented and live-accepted on local
+`agy 1.1.1`. It intentionally advertises catch-up rather than an already-idle
+wake capability.
 
-Planned work:
+Results:
 
 1. **Done:** inspect `agy 1.1.1` and its live plugin and hook contracts.
 2. **Done:** generate an AgentPost plugin from the shared skill source. Antigravity
@@ -39,15 +40,16 @@ Planned work:
 3. **Done:** map `PreInvocation` and `Stop` lifecycle hooks to truthful `working` and
    `idle` presence. Use `Stop` continuation only to inject already-unread
    Message-IDs; notification must remain non-claiming.
-4. **Open:** find and prove a supported external input edge for mail that arrives after
-   the TUI is already idle. Current public hook documentation describes loop
-   continuation but not an external prompt API. Do not use terminal keystroke
-   injection. If no supported edge exists, ship an honest catch-up-only profile
-   and keep full live wake unsupported.
-5. **In progress:** install, doctor, uninstall, packaged-template, and migration tests for
-   `agy`, including exact Message-ID catch-up and capability degradation.
-6. **Next:** run live immediate/idle, restart, offline queue, and rollback acceptance
-   before claiming Antigravity support on the README front page.
+4. **Done:** evaluate the documented sidecar/`agentapi` input edge. A valid enabled
+   plugin sidecar did not start on the CLI surface: no process, runtime data, or
+   `SidecarManager` log appeared. Keep already-idle wake unsupported instead of
+   using terminal keystroke injection.
+5. **Done:** cover install, doctor, uninstall, packaged templates, exact Message-ID
+   catch-up, truthful capability degradation, shared-workspace identity
+   selection, and multiline reply input.
+6. **Done:** live-test install, static doctor, plugin hook loading, queued delivery,
+   next-prompt exact-ID injection, claim, and correlated reply. Final generalized
+   rollback automation remains part of active closeout.
 
 Primary references:
 
@@ -55,6 +57,7 @@ Primary references:
 - [Migrating from Gemini CLI](https://antigravity.google/docs/gcli-migration)
 - [Antigravity plugins](https://antigravity.google/docs/plugins)
 - [Antigravity hooks](https://antigravity.google/docs/hooks)
+- [Antigravity sidecars](https://antigravity.google/docs/sidecars)
 
 Legacy Gemini extension and ACP concepts in `SPEC.md` are historical design
 evidence, not the current implementation plan. Enterprise-only Gemini CLI

@@ -211,7 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     reply = commands.add_parser("reply")
     reply.add_argument("agent")
     reply.add_argument("message_id")
-    reply.add_argument("body")
+    reply.add_argument("body", nargs="?")
     reply.add_argument("--notify", choices=("idle", "immediate"), default="immediate")
 
     native_claude_boundary = commands.add_parser("internal-claude-boundary")
@@ -491,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
             result = office.reply(
                 args.agent,
                 args.message_id,
-                args.body,
+                _channel_body(args.body),
                 notify=args.notify,
             )
             print(result.message_id)
