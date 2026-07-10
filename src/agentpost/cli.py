@@ -253,7 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = _parse_args(parser, argv)
     office = _office(args)
     try:
         if args.command == "init":
@@ -546,6 +546,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"agentpost: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def _parse_args(
+    parser: argparse.ArgumentParser, argv: list[str] | None
+) -> argparse.Namespace:
+    args, extras = parser.parse_known_args(argv)
+    supports_optional_body = args.command in {"message", "question", "reply"}
+    if (
+        supports_optional_body
+        and args.body is None
+        and len(extras) == 1
+        and (extras[0] == "-" or not extras[0].startswith("-"))
+    ):
+        args.body = extras[0]
+        return args
+    if extras:
+        parser.error(f"unrecognized arguments: {' '.join(extras)}")
+    return args
 
 
 def _print_panel(status) -> None:

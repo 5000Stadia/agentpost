@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -116,6 +116,31 @@ class JoinCommandTest(unittest.TestCase):
         reply = self.office.list_messages("pb")[0].letter
         self.assertEqual(reply.body, body)
         self.assertEqual(reply.in_reply_to, request.message_id)
+
+    def test_optional_channel_bodies_may_follow_flags(self) -> None:
+        request = self.office.send("pb", "app", "Please reply.")
+        commands = (
+            ["message", "pb", "--notify", "immediate", "message after flag"],
+            ["question", "pb", "--subject", "Review", "question after flag"],
+            [
+                "reply",
+                "app",
+                request.message_id,
+                "--notify",
+                "idle",
+                "reply after flag",
+            ],
+        )
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            for command in commands:
+                with self.subTest(command=command[0]):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        result = main(["--root", str(self.root), *command])
+                    self.assertEqual(result, 0)
+        self.assertEqual(
+            [record.letter.body for record in self.office.list_messages("pb")],
+            ["message after flag", "question after flag", "reply after flag"],
+        )
 
     def test_identities_and_resolve_expose_the_address_book(self) -> None:
         identities = StringIO()
