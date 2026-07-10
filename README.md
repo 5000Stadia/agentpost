@@ -33,7 +33,7 @@ Follow any restart prompt, then tell one agent to talk to the other.
 Examples:
 
 - Ask Agent Two to review this API contract for implementation risks.
-- When done, send the spec to Spec Reviewer for deliberation until Green.  Implement, then after implementation review with Code Reviewer.
+- Deliberate with Spec Reviewer until Green.  Implement, then after implementation review with Code Reviewer.
 - Ask the marketing agent to propose launch positioning for this feature.
 - Ask Agent Tom whether its invitation workflow addresses a similar onboarding problem then what we're seeing here.
 - Ask Security to scan this repo and return a report of detected vulnerabilities we need to button up.
