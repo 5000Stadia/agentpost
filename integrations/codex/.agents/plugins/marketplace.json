@@ -1,0 +1,20 @@
+{
+  "name": "agentpost-local",
+  "interface": {
+    "displayName": "AgentPost Local Development"
+  },
+  "plugins": [
+    {
+      "name": "agentpost",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agentpost"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

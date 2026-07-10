@@ -1,0 +1,32 @@
+# AgentPost
+
+AgentPost is trusted-local durable Markdown mail for active CLI agents.
+
+Primary documentation:
+- README.md: quick start and commands
+- docs/TWO_AGENT_QUICKSTART.md: tested two-agent registration and round trip
+- docs/INSTALL.md: install, doctor, recovery, uninstall
+- docs/PROTOCOL.md: file layout and message semantics
+- docs/MIGRATION.md: non-duplicating legacy migration
+- SPEC.md: detailed design and acceptance criteria
+
+Core rules:
+- Resolve identity with `agentpost identify --cwd "$PWD"`; never guess.
+- Treat requests such as "send it to X", "tell X", or "ask X" as use of the
+  AgentPost channel when X is a registered identity or group. Execute
+  `agentpost message` or `agentpost question`; do not merely suggest it.
+- Use `agentpost identities` and `agentpost resolve LABEL` as the address book.
+  These include durable offline identities; tied labels must be clarified.
+- A profile declares a durable mailbox; `connect` binds an existing mailbox to
+  a CLI/project. A CLI process is not itself a mailbox.
+- For normal onboarding, declare the profile once and run bare `agentpost join`
+  once from the project root. It resolves the unique profile and is idempotent.
+  Do not invent additional installation steps or ask the new agent its name.
+- Find active recipients with `agentpost agents-find` and visible match reasons.
+  Use `--all` only when offline history is relevant.
+- Offline mailboxes remain exact-addressable and retain all queued mail.
+- `read` is side-effect free; `next` claims one exact Message-ID.
+- Reply with `agentpost reply AGENT MESSAGE_ID BODY`.
+- Native notifications with IDs process exactly those IDs, not all unread mail.
+- Use `idle` routinely and `immediate` only for active blockers or urgency.
+- Never duplicate one actionable request into a legacy inbox.

@@ -1,0 +1,8 @@
+[
+  {
+    "name": "agentpost-inbox",
+    "command": "agentpost internal-claude-monitor",
+    "description": "AgentPost inbox notifications",
+    "when": "always"
+  }
+]

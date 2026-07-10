@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agentpost internal-codex-hook session-start",
+            "statusMessage": "Checking AgentPost mail"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agentpost internal-codex-hook stop",
+            "statusMessage": "Checking AgentPost mail"
+          }
+        ]
+      }
+    ]
+  }
+}

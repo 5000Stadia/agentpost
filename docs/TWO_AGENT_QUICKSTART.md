@@ -1,0 +1,239 @@
+# Two-agent quick start
+
+This walkthrough proves the complete local exchange before involving a model or
+native CLI notification. It creates two temporary Python-neutral identities,
+binds each to a project, sends one request by display name, claims it, replies,
+and verifies correlation.
+
+## Run the tested example
+
+From the AgentPost checkout:
+
+```sh
+./scripts/smoke_two_agents.sh
+```
+
+Expected final output:
+
+```text
+TWO-AGENT-SMOKE  PASS  message=<...@agentpost.local>  reply=<...@agentpost.local>
+```
+
+The script uses a temporary post office and removes it on exit. It makes no LLM
+calls and does not alter `~/.agentpost`.
+
+Agent One and Agent Two may use any combination of Claude Code, Codex, and an
+embedded Python runtime. Use the runtime-specific instruction under each step.
+
+## 1. Initialize the shared post office
+
+This step is the same for every runtime and is done once per operating-system
+user:
+
+```sh
+agentpost init --connection-mode auto
+AGENT_ONE_ROOT="$HOME/work/agent-one"
+AGENT_TWO_ROOT="$HOME/work/agent-two"
+mkdir -p "$AGENT_ONE_ROOT" "$AGENT_TWO_ROOT"
+```
+
+Runtime prerequisites:
+
+- **Claude Code:** Claude must already be installed and authenticated. `join`
+  installs the project plugin.
+- **Codex:** Codex must already be installed and authenticated. Node.js 22+ is
+  required for the live app-server bridge.
+- **Python:** Python 3.11+ must be able to import `agentpost`; no CLI plugin or
+  Node.js process is required.
+
+## 2. Add Agent One
+
+Choose exactly one runtime value:
+
+```sh
+AGENT_ONE_CLI=claude  # Claude Code
+# AGENT_ONE_CLI=codex   # Codex
+# AGENT_ONE_CLI=python  # Embedded Python
+```
+
+Then register the durable identity:
+
+```sh
+agentpost profile-register agent-one \
+  --display-name 'Agent One' --cli "$AGENT_ONE_CLI" --kind project \
+  --summary 'Owns planning and turns requirements into implementation briefs.' \
+  --projects agent-one-project --project-roots "$AGENT_ONE_ROOT" \
+  --specialties 'planning,requirements' \
+  --handles 'implementation briefs,requirements questions'
+```
+
+## 3. Add Agent Two
+
+Choose Agent Two's runtime independently:
+
+```sh
+AGENT_TWO_CLI=codex  # Codex
+# AGENT_TWO_CLI=claude  # Claude Code
+# AGENT_TWO_CLI=python  # Embedded Python
+```
+
+```sh
+agentpost profile-register agent-two \
+  --display-name 'Agent Two' --cli "$AGENT_TWO_CLI" --kind specialist \
+  --summary 'Owns implementation review and checks briefs for engineering risk.' \
+  --projects agent-two-project --project-roots "$AGENT_TWO_ROOT" \
+  --specialties 'code review,engineering risk' \
+  --handles 'implementation reviews,risk analysis'
+```
+
+`profile-register` creates a durable mailbox identity. It does not create a new
+identity every time the corresponding process opens.
+
+## 4. Connect each project
+
+Repeat the matching option for Agent One and Agent Two.
+
+### Claude Code
+
+```sh
+cd "$AGENT_ONE_ROOT"
+agentpost join
+agentpost doctor agent-one --project "$PWD" --cli claude
+```
+
+Restart or reload the Claude project session after `join`. The project plugin's
+native monitor handles catch-up, immediate notification, idle deferral, and
+presence heartbeats. For Agent Two, substitute its name and project root.
+
+### Codex
+
+```sh
+cd "$AGENT_TWO_ROOT"
+agentpost join
+agentpost doctor agent-two --project "$PWD" --cli codex
+agentpost codex --agent agent-two
+```
+
+Trust both AgentPost hooks when Codex first prompts. Launching with `agentpost
+codex` supplies live immediate steering and true idle deferral. An ordinary
+Codex launch retains lifecycle-hook catch-up but not the full live bridge.
+
+### Embedded Python
+
+```sh
+cd "$AGENT_ONE_ROOT"
+agentpost join
+agentpost doctor agent-one --project "$PWD" --cli python
+```
+
+Embed one runtime after the host scheduler is ready:
+
+```python
+from agentpost import AgentRuntime
+
+runtime = AgentRuntime("agent-one", on_mail=enqueue_into_host_scheduler)
+runtime.start()
+```
+
+Use `runtime.turn()` or `begin_work()` / `end_work()` around host turns. The
+runtime never calls a model or claims mail; it only surfaces Message-IDs.
+
+## 5. Tell them to talk
+
+### Claude Code or Codex chat
+
+In Agent One's chat, use natural channel language:
+
+> Ask Agent Two through AgentPost to review the storage plan and identify its
+> largest implementation risk.
+
+The installed skill resolves `Agent Two`, composes a self-contained question,
+and sends it. You do not need to dictate a shell command to the agent.
+
+### Explicit CLI, from any bound project
+
+The portable command is the same for Claude Code, Codex, and Python-hosted
+projects:
+
+```sh
+cd "$AGENT_ONE_ROOT"
+agentpost question 'Agent Two' \
+  'Review the storage plan and identify its largest implementation risk.'
+```
+
+The sender is inferred from Agent One's bound project root. An offline Agent
+Two still receives durable queued mail.
+
+### Embedded Python API
+
+```python
+result = runtime.channel.question(
+    "Agent Two",
+    "Review the storage plan and identify its largest implementation risk.",
+)
+print(result.message_id)
+```
+
+## 6. Receive, claim, and reply
+
+### Claude Code
+
+The native monitor wakes the project session with the exact Message-ID. The
+installed skill inspects that letter and claims it only when starting the work.
+
+### Codex
+
+The app-server bridge starts or steers the turn with the exact Message-ID. The
+fallback lifecycle hook catches up on unread mail after an ordinary launch.
+
+### Embedded Python
+
+`AgentRuntime` supplies a notification batch to the callback or queue. Enqueue
+it into the host scheduler, then use `PostOffice.claim()` only when that job is
+admitted.
+
+### Portable CLI workflow
+
+All three runtimes may use the same inspection, claim, and reply commands:
+
+```sh
+agentpost list agent-two
+agentpost next agent-two --message-id '<message-id>'
+agentpost reply agent-two '<message-id>' \
+  'The largest risk is retrying a partially committed write without an idempotency key.'
+```
+
+Agent One can then inspect the correlated response:
+
+```sh
+agentpost list agent-one
+agentpost read agent-one '<reply-message-id>'
+```
+
+The reply contains `In-Reply-To: <message-id>`. If Agent Two was offline, the
+request remains queued and is surfaced when its integration reconnects; the
+sender should not resend it through another channel.
+
+The direct Python equivalent is:
+
+```python
+from agentpost import AgentRuntime
+
+agent_two_runtime = AgentRuntime("agent-two", on_mail=enqueue_into_host_scheduler)
+record = agent_two_runtime.office.claim("agent-two", message_id)
+agent_two_runtime.office.reply(
+    "agent-two",
+    record.letter.message_id,
+    "The largest risk is retrying a partially committed write without an idempotency key.",
+)
+```
+
+## 7. Acceptance check
+
+The two-agent setup is working when:
+
+1. Each project resolves its own identity with `agentpost identify --cwd "$PWD"`.
+2. `agentpost resolve 'Agent Two'` returns `agent-two` without guessing.
+3. Agent Two claims the exact request Message-ID.
+4. Agent One receives a reply carrying the correct `In-Reply-To` value.
+5. No duplicate request was placed in a legacy inbox.

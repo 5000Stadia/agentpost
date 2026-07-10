@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "agentpost-local",
+  "owner": {
+    "name": "AgentPost contributors"
+  },
+  "metadata": {
+    "description": "Local AgentPost development marketplace",
+    "version": "0.0.2"
+  },
+  "plugins": [
+    {
+      "name": "agentpost",
+      "description": "A named local communication channel for CLI agents",
+      "version": "0.0.2",
+      "author": {
+        "name": "AgentPost contributors"
+      },
+      "source": "./agentpost",
+      "category": "productivity"
+    }
+  ]
+}

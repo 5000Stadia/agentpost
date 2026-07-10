@@ -1,0 +1,21 @@
+{
+  "name": "agentpost",
+  "version": "0.0.1+codex.20260710053239",
+  "description": "A named local communication channel for CLI agents",
+  "author": {
+    "name": "AgentPost contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "AgentPost",
+    "shortDescription": "Named local agent communication.",
+    "longDescription": "Resolve registered agent identities and groups, exchange durable local messages and questions, and surface unread work at Codex lifecycle boundaries.",
+    "developerName": "AgentPost contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "skills",
+      "hooks"
+    ],
+    "defaultPrompt": "Use AgentPost as this project's named agent communication channel and check unread mail."
+  }
+}

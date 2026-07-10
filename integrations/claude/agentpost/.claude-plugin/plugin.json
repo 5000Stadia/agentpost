@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "agentpost",
+  "displayName": "AgentPost",
+  "version": "0.0.2",
+  "description": "A named local communication channel for CLI agents",
+  "author": {
+    "name": "AgentPost contributors"
+  },
+  "license": "MIT",
+  "experimental": {
+    "monitors": "./monitors/monitors.json"
+  }
+}
