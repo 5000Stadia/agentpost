@@ -291,12 +291,16 @@ def codex_launch(
     )
     port = _free_loopback_port()
     url = f"ws://127.0.0.1:{port}"
+    environment = os.environ.copy()
+    environment["AGENTPOST_CODEX_BRIDGE"] = "1"
+    environment["AGENTPOST_AGENT"] = profile.name
     server = None
     bridge = None
     try:
         server = subprocess.Popen(
             ["codex", "app-server", "--listen", url],
             cwd=cwd,
+            env=environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -327,6 +331,7 @@ def codex_launch(
                 lease.instance_id,
             ],
             cwd=cwd,
+            env=environment,
         )
         time.sleep(0.1)
         if bridge.poll() is not None:
@@ -335,9 +340,6 @@ def codex_launch(
                 f"{bridge.returncode}"
             )
         command = _codex_remote_command(url, codex_args)
-        environment = os.environ.copy()
-        environment["AGENTPOST_CODEX_BRIDGE"] = "1"
-        environment["AGENTPOST_AGENT"] = profile.name
         try:
             return subprocess.call(command, cwd=cwd, env=environment)
         except KeyboardInterrupt:

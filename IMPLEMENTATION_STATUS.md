@@ -1,6 +1,6 @@
 # AgentPost Implementation Status
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 ## Current phase
 
@@ -12,7 +12,7 @@ are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
 `agentpost@agentpost-local` plugin at 0.0.5 installed; Cx runs Codex plugin
-generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.11.
+generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.12.
 Codex hook commands are stable across upgrades; a process that predates the
 user prompt hook must reload before that event becomes live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
@@ -40,6 +40,10 @@ or the original data directories.
 - Codex plugin plus `agentpost codex` loopback app-server binding with live
   catch-up, `turn/steer`, idle deferral, exact-ID processing, and fallback-hook
   ownership suppression.
+- Explicit named-role identity propagation through the Codex app-server,
+  mailbox bridge, remote client, and tool subprocesses, plus ancestry-aware
+  diagnostics that identify an accidental nested launcher as the current
+  session's own parent bridge.
 - Token-free Codex `SessionStart`/`UserPromptSubmit`/`Stop` catch-up, exact
   executed-generation markers that never imply presence, `3/3` hook-trust
   verification, stale/unobserved/ambiguous generation diagnostics, and
@@ -89,7 +93,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 112 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 116 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 
@@ -109,14 +113,20 @@ quietly instead of crash-looping after missing runtime state. The packaged
 Codex bridge accepts the launcher's kebab-case ownership arguments and fails a
 malformed startup visibly.
 
+The 0.0.12 regression path additionally starts a real Codex app-server with an
+explicit non-default role on a workspace whose default differs, invokes
+`agentpost identify --cwd` through token-free `command/exec`, and verifies that
+the tool subprocess observes the explicit role. Mocked boundary coverage also
+requires the same resolved environment on app-server, bridge, and remote client;
+nested-launch lease tests pin both the parent-bridge and unrelated-owner wording.
+
 Live acceptance is being rerun on Claude Code 2.1.206 and Codex CLI 0.144.1.
 Managed Codex has proved restart catch-up, already-idle wake, and active-turn
 immediate steering plus post-turn idle deferral; child-state cleanup remains
 open. Claude K, PB, and C each proved project-local 0.0.5 fresh-load monitor
 startup, already-idle wake before any user prompt, exact-ID claims, and
-correlated replies. K and PB additionally completed active-turn immediate and
-post-turn idle-deferral probes. C completed active-turn immediate delivery; its
-idle probe remains correctly deferred while C's real work turn is still active.
+correlated replies. K, PB, and C additionally completed active-turn immediate
+and post-turn idle-deferral probes without duplicate processing.
 The Codex generation slice additionally proved `3/3` current hook discovery,
 token-free trust inspection through `hooks/list`, per-event generation stamps,
 and stable trust across plugin reinstall.

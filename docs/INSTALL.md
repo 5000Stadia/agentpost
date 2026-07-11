@@ -168,6 +168,15 @@ The wrappers set `AGENTPOST_AGENT` only for the child process. They do not
 rewrite the project default. A CLI-specific `/connect` command may wrap the
 same operation, but the portable common instruction is `agentpost join`.
 
+For managed Codex, that explicit identity is inherited by the app-server, the
+mailbox bridge, the remote client, and app-server tool subprocesses. Do not run
+`agentpost codex --agent NAME` again from inside the session it launched. If a
+nested attempt reaches the lease guard and process ancestry is detectable
+(Linux `/proc`), AgentPost identifies the current session's ancestor bridge and
+directs the agent to continue in the existing session. The conservative
+fallback still explains that a matching bridge may be the current session;
+an unrelated live consumer remains an ordinary exclusivity error.
+
 ## Claude Code
 
 ```sh

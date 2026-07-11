@@ -20,6 +20,10 @@ after observing its stated result; record Message-IDs for mail-flow evidence.
   same dispatchers preserves `3/3` trust.
 - [x] Isolated Codex acceptance observed current `SessionStart`,
   `UserPromptSubmit`, and `Stop` generation markers without claiming mail.
+- [x] Shared-root Codex role acceptance starts a real app-server with explicit
+  role `cr` while the workspace default is `c`, executes `agentpost identify`
+  through token-free `command/exec`, and observes `cr`; all launcher children
+  receive the same resolved identity environment.
 - [x] Kernos independently returned full-diff GREEN, then focused GREEN after
   both review notes were implemented; its final independent run passed all 112
   tests.

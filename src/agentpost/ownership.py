@@ -69,10 +69,23 @@ class ConsumerLease:
         owner = self.current_owner()
         detail = "another live instance"
         if owner:
+            owner_pid = owner.get("pid")
+            if owner.get("adapter") == "codex" and _is_process_ancestor(owner_pid):
+                raise AgentPostError(
+                    f"mailbox {self.agent} is already owned by this Codex session's "
+                    f"parent bridge (PID {owner_pid}, instance "
+                    f"{owner.get('instance_id', '?')}); do not launch or join it again; "
+                    "continue in the existing session"
+                )
             detail = (
                 f"{owner.get('adapter', 'unknown')} pid {owner.get('pid', '?')} "
                 f"instance {owner.get('instance_id', '?')}"
             )
+            if owner.get("adapter") == "codex":
+                detail += (
+                    "; if this command is running inside that managed Codex session, "
+                    "continue there instead of launching a nested copy"
+                )
         raise AgentPostError(
             f"mailbox {self.agent} already has an inbound consumer: {detail}"
         )
@@ -115,3 +128,22 @@ def _atomic_json(path: Path, value: object) -> None:
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def _is_process_ancestor(ancestor_pid: object, descendant_pid: int | None = None) -> bool:
+    """Best-effort Linux ancestry check used only to improve lease diagnostics."""
+    try:
+        ancestor = int(ancestor_pid)
+        current = int(descendant_pid or os.getpid())
+    except (TypeError, ValueError):
+        return False
+    while current > 1:
+        if current == ancestor:
+            return True
+        try:
+            stat = Path(f"/proc/{current}/stat").read_text(encoding="ascii")
+            fields = stat[stat.rfind(")") + 2 :].split()
+            current = int(fields[1])
+        except (OSError, ValueError, IndexError):
+            return False
+    return current == ancestor

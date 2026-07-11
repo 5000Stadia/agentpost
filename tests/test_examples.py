@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import json
+import select
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -14,10 +16,115 @@ ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from agentpost.codex_generation import CODEX_HOOK_GENERATION  # noqa: E402
+from agentpost import PostOffice, Profile  # noqa: E402
 from agentpost.installer import _claude_plugin_version  # noqa: E402
 
 
 class DocumentationExampleTest(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("codex"), "Codex CLI is not installed")
+    def test_real_codex_tool_subprocess_inherits_explicit_role(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "post"
+            project = base / "shared-project"
+            project.mkdir()
+            office = PostOffice(root)
+            for name in ("c", "cr"):
+                office.register_profile(
+                    Profile(
+                        name=name,
+                        display_name=name.upper(),
+                        cli="codex",
+                        kind="role",
+                        summary=f"Role {name}",
+                        roles=("review",),
+                        project_roots=(str(project),),
+                    )
+                )
+                office.bind_agent(name, "codex", project)
+
+            environment = os.environ.copy()
+            environment["AGENTPOST_AGENT"] = "cr"
+            environment["AGENTPOST_ROOT"] = str(root)
+            source_path = str(ROOT / "src")
+            environment["PYTHONPATH"] = os.pathsep.join(
+                part for part in (source_path, environment.get("PYTHONPATH", "")) if part
+            )
+            process = subprocess.Popen(
+                ["codex", "app-server", "--stdio"],
+                cwd=project,
+                env=environment,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            def request(request_id: int, method: str, params: dict) -> dict:
+                assert process.stdin is not None
+                assert process.stdout is not None
+                process.stdin.write(
+                    json.dumps({"id": request_id, "method": method, "params": params})
+                    + "\n"
+                )
+                process.stdin.flush()
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    ready, _, _ = select.select([process.stdout], [], [], 0.1)
+                    if not ready:
+                        continue
+                    message = json.loads(process.stdout.readline())
+                    if message.get("id") == request_id:
+                        return message
+                self.fail(f"Codex app-server request timed out: {method}")
+
+            try:
+                initialized = request(
+                    1,
+                    "initialize",
+                    {
+                        "clientInfo": {
+                            "name": "agentpost-test",
+                            "title": "AgentPost Test",
+                            "version": "0",
+                        },
+                        "capabilities": {"experimentalApi": True},
+                    },
+                )
+                self.assertNotIn("error", initialized)
+                assert process.stdin is not None
+                process.stdin.write(json.dumps({"method": "initialized", "params": {}}) + "\n")
+                process.stdin.flush()
+                result = request(
+                    2,
+                    "command/exec",
+                    {
+                        "command": [
+                            sys.executable,
+                            "-c",
+                            "from agentpost.cli import main; main()",
+                            "identify",
+                            "--cwd",
+                            str(project),
+                        ],
+                        "cwd": str(project),
+                        "timeoutMs": 5000,
+                    },
+                )
+                self.assertNotIn("error", result)
+                self.assertEqual(result["result"]["exitCode"], 0)
+                self.assertEqual(result["result"]["stdout"].strip(), "cr")
+            finally:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=3)
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_codex_bridge_accepts_launcher_argument_names(self) -> None:
         bridge = ROOT / "src" / "agentpost" / "data" / "codex_bridge.mjs"

@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from agentpost import (  # noqa: E402
+    AgentPostError,
     BoundaryBell,
     MailboxWatcher,
     PostOffice,
@@ -28,6 +29,7 @@ from agentpost.native import (  # noqa: E402
     _codex_bridge_marker,
     _codex_remote_command,
     claude_boundary,
+    codex_launch,
     codex_hook,
     codex_snapshot,
 )
@@ -107,6 +109,36 @@ class AdapterTest(unittest.TestCase):
         claude.release()
         self.assertTrue(python.acquire())
         python.release()
+
+    def test_nested_codex_lease_names_the_current_parent_bridge(self) -> None:
+        office = self.office()
+        owner = ConsumerLease(office, "cx", "codex")
+        contender = ConsumerLease(office, "cx", "codex")
+        owner.require()
+        try:
+            with patch("agentpost.ownership._is_process_ancestor", return_value=True):
+                with self.assertRaisesRegex(
+                    AgentPostError,
+                    "owned by this Codex session's parent bridge.*do not launch or join",
+                ):
+                    contender.require()
+        finally:
+            owner.release()
+
+    def test_unrelated_codex_lease_keeps_exclusive_owner_diagnostic(self) -> None:
+        office = self.office()
+        owner = ConsumerLease(office, "cx", "codex")
+        contender = ConsumerLease(office, "cx", "codex")
+        owner.require()
+        try:
+            with patch("agentpost.ownership._is_process_ancestor", return_value=False):
+                with self.assertRaisesRegex(
+                    AgentPostError,
+                    "already has an inbound consumer.*instead of launching a nested copy",
+                ):
+                    contender.require()
+        finally:
+            owner.release()
 
     def test_mailboxes_cold_start_independently_in_any_first_agent_order(self) -> None:
         office = self.office()
@@ -360,6 +392,57 @@ lease.release()
             _codex_remote_command("ws://local", ["--model", "gpt-5"]),
             ["codex", "--remote", "ws://local", "--model", "gpt-5"],
         )
+
+    def test_codex_launcher_propagates_nondefault_identity_to_every_child(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "shared-project"
+        project.mkdir()
+        for name in ("c", "cr"):
+            office.register_profile(
+                Profile(
+                    name=name,
+                    display_name=name.upper(),
+                    cli="codex",
+                    kind="role",
+                    summary=f"Role {name}",
+                    roles=("review",),
+                    project_roots=(str(project),),
+                )
+            )
+            office.bind_agent(name, "codex", project)
+        (project / ".agentpost.toml").write_text(
+            'version = 1\ndefault_agent = "c"\nknown_agents = ["c", "cr"]\n',
+            encoding="ascii",
+        )
+
+        class FakeProcess:
+            returncode = None
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                self.returncode = 0
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        server = FakeProcess()
+        bridge = FakeProcess()
+        with patch("agentpost.native._free_loopback_port", return_value=4321), \
+                patch("agentpost.native._wait_for_app_server"), \
+                patch("agentpost.native.subprocess.Popen", side_effect=[server, bridge]) as popen, \
+                patch("agentpost.native.subprocess.call", return_value=0) as call:
+            self.assertEqual(codex_launch(office, project, [], agent="cr"), 0)
+
+        child_environments = [
+            popen.call_args_list[0].kwargs["env"],
+            popen.call_args_list[1].kwargs["env"],
+            call.call_args.kwargs["env"],
+        ]
+        for environment in child_environments:
+            self.assertEqual(environment["AGENTPOST_AGENT"], "cr")
+            self.assertEqual(environment["AGENTPOST_CODEX_BRIDGE"], "1")
 
     def test_codex_fallback_hook_is_suppressed_by_live_bridge_marker(self) -> None:
         office = self.office()
