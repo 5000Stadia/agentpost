@@ -244,6 +244,51 @@ class JoinCommandTest(unittest.TestCase):
             ["message after flag", "question after flag", "reply after flag"],
         )
 
+    def test_codex_install_forwards_session_close_confirmation(self) -> None:
+        with patch("agentpost.cli.install") as install:
+            result = main(
+                [
+                    "--root",
+                    str(self.root),
+                    "install",
+                    "codex",
+                    "--agent",
+                    "app",
+                    "--project",
+                    str(self.project),
+                    "--confirm-codex-sessions-closed",
+                ]
+            )
+        self.assertEqual(result, 0)
+        install.assert_called_once()
+        args, kwargs = install.call_args
+        self.assertEqual(args[0].root, self.root)
+        self.assertEqual(args[1:], ("codex", "app", self.project))
+        self.assertEqual(kwargs, {"confirm_codex_sessions_closed": True})
+
+    def test_codex_join_forwards_session_close_confirmation(self) -> None:
+        with patch("agentpost.cli.install") as install:
+            with redirect_stdout(StringIO()):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "join",
+                        "app",
+                        "--cli",
+                        "codex",
+                        "--project",
+                        str(self.project),
+                        "--confirm-codex-sessions-closed",
+                    ]
+                )
+        self.assertEqual(result, 0)
+        install.assert_called_once()
+        args, kwargs = install.call_args
+        self.assertEqual(args[0].root, self.root)
+        self.assertEqual(args[1:], ("codex", "app", self.project))
+        self.assertEqual(kwargs, {"confirm_codex_sessions_closed": True})
+
     def test_identities_and_resolve_expose_the_address_book(self) -> None:
         identities = StringIO()
         with redirect_stdout(identities):

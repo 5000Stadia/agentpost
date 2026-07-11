@@ -29,6 +29,23 @@ setup succeeds. If Codex setup fails after staging the AgentPost user hook, the
 original hook document is restored byte-for-byte and no new binding or
 workspace marker is recorded.
 
+Codex plugin generations use versioned cache paths. Every managed AgentPost
+Codex launcher holds a shared plugin lock for its lifetime; cache replacement
+requires the exclusive lock and fails before mutation while a managed session
+is live. A proven same-generation install does not remove or recreate the cache.
+
+Codex does not expose a complete registry of unmanaged sessions. For a
+generation-changing or ambiguous repair, close every Codex session and confirm
+that boundary explicitly from a terminal:
+
+```sh
+agentpost install codex --agent AGENT --project PROJECT \
+  --confirm-codex-sessions-closed
+```
+
+The acknowledgement is never accepted from inside a Codex thread. After the
+install, reopen sessions so they receive current skill and hook locators.
+
 The equivalent manual commands are:
 
 ```sh
@@ -130,12 +147,13 @@ agentpost connect app --cli codex --project /work/application
 agentpost identify --cli codex --cwd /work/application
 ```
 
-After upgrading the AgentPost package, re-run the same `join` command. Claude
-refreshes its marketplace cache, updates and enables the local plugin; Codex
-reinstalls from a cache-busted local manifest while its three stable dispatcher
-commands preserve existing trust; Antigravity validates and reinstalls its
-plugin. Mail and workspace identity remain untouched. Reload any Codex process
-that predates a newly added hook.
+After upgrading the AgentPost package, re-run the same `join` command. For a
+Codex generation change, close all Codex sessions and append
+`--confirm-codex-sessions-closed`. Claude refreshes its marketplace cache,
+updates and enables the local plugin; Codex reinstalls from a cache-busted local
+manifest while its three stable dispatcher commands preserve existing trust;
+Antigravity validates and reinstalls its plugin. Mail and workspace identity
+remain untouched. Reload any Codex process that predates a newly added hook.
 
 Moving a project is a new binding, not a mailbox migration. Connect the new
 path, verify it, then remove the old default:
@@ -302,10 +320,11 @@ agentpost doctor AGENT --project /work/project --cli codex
 ```
 
 For incomplete Codex trust, approve the stable AgentPost hooks in `/hooks`. For
-a stale installed cache, re-run `agentpost install codex` (or the same `join`
-command). Reload only when events remain unobserved, then submit one prompt and
-let it complete. A historical hook marker never means the agent is online; only
-a fresh live bridge heartbeat can arm already-idle wake.
+a stale installed cache, close all Codex sessions and re-run `agentpost install
+codex --confirm-codex-sessions-closed` (or the same `join` command with that
+flag). Reload only when events remain unobserved, then submit one prompt and let
+it complete. A historical hook marker never means the agent is online; only a
+fresh live bridge heartbeat can arm already-idle wake.
 
 Never resend an actionable letter through a fallback channel. Use the fallback
 only for installation control or a pointer to the existing Message-ID.

@@ -12,7 +12,13 @@ from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
-from .codex_generation import CODEX_PLUGIN_ID, codex_generation_status
+from .codex_generation import (
+    CODEX_HOOK_GENERATION,
+    CODEX_PLUGIN_ID,
+    _installed_codex_generation,
+    codex_generation_status,
+)
+from .codex_lock import CodexPluginLock
 from .core import AgentPostError, PostOffice
 from .presence import agent_presence
 from .routing import identify_agent
@@ -33,11 +39,19 @@ CODEX_USER_HOOK = {
 }
 
 
-def install(office: PostOffice, cli: str, agent: str, project: Path) -> None:
+def install(
+    office: PostOffice,
+    cli: str,
+    agent: str,
+    project: Path,
+    *,
+    confirm_codex_sessions_closed: bool = False,
+) -> None:
     project = project.expanduser().resolve()
     profile = identify_agent(office, project, cli=cli, agent=agent)
     source = _integration_source(cli)
-    hook_snapshot = _snapshot_file(_codex_user_hooks_path()) if cli == "codex" else None
+    hook_snapshot = None
+    codex_plan = None
     try:
         if cli == "claude":
             _run(
@@ -85,21 +99,26 @@ def install(office: PostOffice, cli: str, agent: str, project: Path) -> None:
                 allow_already=True,
             )
         elif cli == "codex":
+            codex_plan = _codex_install_plan(
+                confirm_sessions_closed=confirm_codex_sessions_closed,
+            )
+            hook_snapshot = _snapshot_file(_codex_user_hooks_path())
             _install_codex_user_hook()
             _run(
                 ["codex", "plugin", "marketplace", "add", str(source)],
                 cwd=project,
                 allow_already=True,
             )
-            _run(
-                ["codex", "plugin", "remove", CODEX_PLUGIN_ID],
-                cwd=project,
-                allow_missing=True,
-            )
-            _run(
-                ["codex", "plugin", "add", CODEX_PLUGIN_ID],
-                cwd=project,
-            )
+            if codex_plan is not None and codex_plan.replace_plugin:
+                _run(
+                    ["codex", "plugin", "remove", CODEX_PLUGIN_ID],
+                    cwd=project,
+                    allow_missing=True,
+                )
+                _run(
+                    ["codex", "plugin", "add", CODEX_PLUGIN_ID],
+                    cwd=project,
+                )
         elif cli == "antigravity":
             _run(
                 ["agy", "plugin", "validate", str(source)],
@@ -121,6 +140,9 @@ def install(office: PostOffice, cli: str, agent: str, project: Path) -> None:
         if hook_snapshot is not None:
             _restore_file(hook_snapshot)
         raise
+    finally:
+        if codex_plan is not None:
+            codex_plan.release()
     if cli == "codex":
         try:
             print(
@@ -378,7 +400,7 @@ def _list_codex_hooks(project: Path, timeout: float = 5.0) -> list[dict]:
                     "clientInfo": {
                         "name": "agentpost-doctor",
                         "title": "AgentPost Doctor",
-                        "version": "0.0.14",
+                        "version": "0.0.15",
                     },
                     "capabilities": {
                         "experimentalApi": True,
@@ -604,6 +626,137 @@ def _restore_file(snapshot: tuple[Path, bytes | None]) -> None:
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+@dataclass
+class _CodexInstallPlan:
+    replace_plugin: bool
+    lock: CodexPluginLock | None = None
+
+    def release(self) -> None:
+        if self.lock is not None:
+            self.lock.release()
+
+
+@dataclass(frozen=True)
+class _CodexInstallState:
+    kind: str
+    generation: str | None
+    detail: str
+
+
+def _codex_install_state(home: Path) -> _CodexInstallState:
+    config_path = home / ".codex/config.toml"
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        config = {}
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        return _CodexInstallState("ambiguous", None, f"Codex config: {exc}")
+    plugins = config.get("plugins", {})
+    if not isinstance(plugins, dict):
+        return _CodexInstallState(
+            "ambiguous", None, "Codex config: plugins is not a table"
+        )
+    has_plugin_entry = CODEX_PLUGIN_ID in plugins
+    if has_plugin_entry and not isinstance(plugins[CODEX_PLUGIN_ID], dict):
+        return _CodexInstallState(
+            "ambiguous", None, "Codex config: AgentPost plugin entry is not a table"
+        )
+
+    cache = home / ".codex/plugins/cache/agentpost-local/agentpost"
+    try:
+        entries = tuple(cache.iterdir())
+    except FileNotFoundError:
+        entries = ()
+    except OSError as exc:
+        return _CodexInstallState("ambiguous", None, f"Codex cache: {exc}")
+    if not has_plugin_entry and not entries:
+        return _CodexInstallState(
+            "absent", None, "no existing AgentPost Codex plugin state"
+        )
+
+    installed, problem = _installed_codex_generation(home)
+    if installed == CODEX_HOOK_GENERATION:
+        return _CodexInstallState(
+            "current", installed, f"installed generation {installed}"
+        )
+    if installed is not None:
+        return _CodexInstallState(
+            "upgrade", installed, f"installed generation {installed}"
+        )
+    return _CodexInstallState(
+        "ambiguous",
+        None,
+        f"ambiguous AgentPost Codex installation: {problem}",
+    )
+
+
+def _require_codex_replacement_acknowledgement(
+    state: _CodexInstallState,
+    *,
+    confirm_sessions_closed: bool,
+) -> None:
+    if state.kind == "absent":
+        return
+    if os.environ.get("CODEX_THREAD_ID"):
+        raise AgentPostError(
+            "Codex plugin replacement cannot run inside a Codex thread; close all "
+            f"Codex sessions and run it from a terminal (installed state: {state.detail})"
+        )
+    if not confirm_sessions_closed:
+        raise AgentPostError(
+            "Codex plugin replacement requires confirmation that every unmanaged "
+            "Codex session is closed; rerun from a terminal with "
+            f"--confirm-codex-sessions-closed (installed state: {state.detail})"
+        )
+
+
+def _codex_install_plan(
+    *,
+    confirm_sessions_closed: bool,
+    home: Path | None = None,
+) -> _CodexInstallPlan:
+    home = home or Path.home()
+    state = _codex_install_state(home)
+    if state.kind == "current":
+        lock = CodexPluginLock(home)
+        if not lock.acquire_shared():
+            raise AgentPostError(
+                "Codex plugin state is changing; retry the install after it completes"
+            )
+        locked_state = _codex_install_state(home)
+        if locked_state.kind == "current":
+            return _CodexInstallPlan(False, lock)
+        lock.release()
+        state = locked_state
+
+    _require_codex_replacement_acknowledgement(
+        state,
+        confirm_sessions_closed=confirm_sessions_closed,
+    )
+    lock = CodexPluginLock(home)
+    if not lock.acquire_exclusive():
+        raise AgentPostError(
+            "Codex plugin replacement is blocked by a managed Codex session; close "
+            "all Codex sessions and retry from a terminal"
+        )
+    try:
+        locked_state = _codex_install_state(home)
+        if locked_state.kind == "current":
+            lock.release()
+            return _codex_install_plan(
+                confirm_sessions_closed=confirm_sessions_closed,
+                home=home,
+            )
+        _require_codex_replacement_acknowledgement(
+            locked_state,
+            confirm_sessions_closed=confirm_sessions_closed,
+        )
+    except Exception:
+        lock.release()
+        raise
+    return _CodexInstallPlan(True, lock)
 
 
 def _doctor_antigravity(project: Path) -> tuple[Check, ...]:

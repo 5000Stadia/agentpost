@@ -12,7 +12,7 @@ are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
 `agentpost@agentpost-local` plugin generation 0.0.6; Cx uses Codex plugin
-generation `0.0.4+codex.20260711042958`, and the Python package is at 0.0.14.
+generation `0.0.4+codex.20260711042958`, and the Python package is at 0.0.15.
 Codex hook commands are stable across upgrades; a process that predates the
 user prompt hook must reload before that event becomes live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
@@ -56,6 +56,10 @@ or the original data directories.
   commands.
 - Transactional adapter binding: failed setup records no false workspace
   connection, and failed Codex setup restores the original user-hook document.
+- Managed Codex sessions and plugin replacement coordinate through a global
+  shared/exclusive lock; replacement also requires an explicit terminal
+  acknowledgement for unmanaged-session quiescence, while same-generation
+  installs leave the cache intact.
 - Hermetic clean-bootstrap verification runs through the real installer in the
   Python 3.11, 3.12, and 3.13 CI matrix; idempotent reinstall preserves runtime
   state.

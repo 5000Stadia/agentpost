@@ -35,10 +35,12 @@ from agentpost.native import (  # noqa: E402
     codex_snapshot,
 )
 from agentpost.codex_generation import (  # noqa: E402
+    CODEX_HOOK_GENERATION,
     _installed_codex_generation,
     codex_generation_status,
     codex_hook_marker,
 )
+from agentpost.codex_lock import CodexPluginLock  # noqa: E402
 from agentpost.installer import (  # noqa: E402
     CODEX_USER_HOOK_COMMAND,
     _claude_plugin_version,
@@ -498,6 +500,47 @@ lease.release()
                 codex_launch(office, project, [], agent="cx")
         self.assertFalse((office.root / "agents/cx/adapter/consumer.json").exists())
 
+    def test_codex_launcher_cannot_start_during_plugin_replacement(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "replacement-project"
+        project.mkdir()
+        home = Path(self.temp.name) / "home"
+        lock = CodexPluginLock(home)
+        self.assertTrue(lock.acquire_exclusive())
+        try:
+            with patch("agentpost.codex_lock.Path.home", return_value=home):
+                with patch("sys.stdin.isatty", return_value=True):
+                    with patch("agentpost.native.subprocess.Popen") as popen:
+                        with self.assertRaisesRegex(
+                            AgentPostError,
+                            "cannot start while AgentPost is replacing",
+                        ):
+                            codex_launch(office, project, [], agent="cx")
+            popen.assert_not_called()
+        finally:
+            lock.release()
+
+    def test_codex_plugin_lock_excludes_a_competing_process(self) -> None:
+        home = Path(self.temp.name) / "cross-process-home"
+        lock = CodexPluginLock(home)
+        self.assertTrue(lock.acquire_exclusive())
+        try:
+            code = (
+                "from pathlib import Path; "
+                "from agentpost.codex_lock import CodexPluginLock; "
+                f"lock = CodexPluginLock(Path({str(home)!r})); "
+                "raise SystemExit(1 if lock.acquire_shared() else 0)"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=Path(__file__).parents[1],
+                env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")},
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+        finally:
+            lock.release()
+
     def test_codex_fallback_hook_is_suppressed_by_live_bridge_marker(self) -> None:
         office = self.office()
         project = Path(self.temp.name) / "cx-project"
@@ -865,6 +908,181 @@ lease.release()
             for handler in group["hooks"]
         ]
         self.assertIn(CODEX_USER_HOOK_COMMAND, {item["command"] for item in handlers})
+
+    def test_codex_generation_upgrade_refuses_an_active_thread_before_mutation(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "upgrade-preflight-project"
+        project.mkdir()
+        home = Path(self.temp.name) / "home"
+        self._write_codex_install(home, "old-generation")
+        hooks_path = home / ".codex" / "hooks.json"
+        hooks_path.write_text('{"hooks":{"Stop":[]}}\n', encoding="utf-8")
+        original_hooks = hooks_path.read_bytes()
+        with patch("agentpost.installer._integration_source", return_value=project):
+            with patch("agentpost.installer.Path.home", return_value=home):
+                with patch.dict("os.environ", {"CODEX_THREAD_ID": "thread-1"}):
+                    with patch("agentpost.installer._run") as run:
+                        with self.assertRaisesRegex(
+                            AgentPostError,
+                            "cannot run inside a Codex thread.*installed state",
+                        ):
+                            install(office, "codex", "cx", project)
+
+        run.assert_not_called()
+        self.assertEqual(hooks_path.read_bytes(), original_hooks)
+        self.assertEqual(office.list_bindings(), ())
+        self.assertFalse((project / ".agentpost.toml").exists())
+
+    def test_codex_generation_upgrade_requires_terminal_acknowledgement(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "terminal-ack-project"
+        project.mkdir()
+        home = Path(self.temp.name) / "home-terminal-ack"
+        self._write_codex_install(home, "old-generation")
+        with patch("agentpost.installer._integration_source", return_value=project):
+            with patch("agentpost.installer.Path.home", return_value=home):
+                with patch.dict("os.environ", {}, clear=True):
+                    with patch("agentpost.installer._run") as run:
+                        with self.assertRaisesRegex(
+                            AgentPostError,
+                            "--confirm-codex-sessions-closed",
+                        ):
+                            install(office, "codex", "cx", project)
+        run.assert_not_called()
+
+        with patch("agentpost.installer._integration_source", return_value=project):
+            with patch("agentpost.installer.Path.home", return_value=home):
+                with patch.dict("os.environ", {}, clear=True):
+                    with patch("agentpost.installer._run") as run:
+                        with redirect_stdout(StringIO()):
+                            install(
+                                office,
+                                "codex",
+                                "cx",
+                                project,
+                                confirm_codex_sessions_closed=True,
+                            )
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(["codex", "plugin", "remove", "agentpost@agentpost-local"], commands)
+        self.assertIn(["codex", "plugin", "add", "agentpost@agentpost-local"], commands)
+
+    def test_codex_generation_upgrade_refuses_another_live_managed_bridge(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "other-live-bridge-project"
+        project.mkdir()
+        home = Path(self.temp.name) / "home"
+        self._write_codex_install(home, "old-generation")
+
+        session_lock = CodexPluginLock(home)
+        self.assertTrue(session_lock.acquire_shared())
+        try:
+            with patch("agentpost.installer._integration_source", return_value=project):
+                with patch("agentpost.installer.Path.home", return_value=home):
+                    with patch.dict("os.environ", {}, clear=True):
+                        with patch("agentpost.installer._run") as run:
+                            with self.assertRaisesRegex(
+                                AgentPostError,
+                                "blocked by a managed Codex session",
+                            ):
+                                install(
+                                    office,
+                                    "codex",
+                                    "cx",
+                                    project,
+                                    confirm_codex_sessions_closed=True,
+                                )
+        finally:
+            session_lock.release()
+
+        run.assert_not_called()
+        self.assertEqual(office.list_bindings(), ())
+
+    def test_codex_generation_upgrade_fails_closed_on_ambiguous_cache_state(self) -> None:
+        for malformed in (False, True):
+            with self.subTest(malformed=malformed):
+                office = self.office()
+                project = Path(self.temp.name) / f"ambiguous-{malformed}"
+                project.mkdir()
+                home = Path(self.temp.name) / f"home-{malformed}"
+                self._write_codex_install(home, "generation-1")
+                if malformed:
+                    manifest = (
+                        home
+                        / ".codex/plugins/cache/agentpost-local/agentpost/generation-1"
+                        / ".codex-plugin/plugin.json"
+                    )
+                    manifest.write_text("not json", encoding="utf-8")
+                    expected = "missing or malformed manifest"
+                else:
+                    self._write_codex_cache(home, "generation-2")
+                    expected = "found 2"
+                with patch(
+                    "agentpost.installer._integration_source", return_value=project
+                ):
+                    with patch("agentpost.installer.Path.home", return_value=home):
+                        with patch.dict(
+                            "os.environ", {"CODEX_THREAD_ID": "active-thread"}
+                        ):
+                            with patch("agentpost.installer._run") as run:
+                                with self.assertRaisesRegex(AgentPostError, expected):
+                                    install(office, "codex", "cx", project)
+                run.assert_not_called()
+
+    def test_codex_replacement_fails_closed_on_residual_or_malformed_config(self) -> None:
+        cases = {
+            "disabled": (
+                '[plugins."agentpost@agentpost-local"]\nenabled = false\n',
+                "plugin is not enabled",
+            ),
+            "malformed": ('[plugins."agentpost@agentpost-local"\n', "Codex config"),
+            "non-table": (
+                '[plugins]\n"agentpost@agentpost-local" = true\n',
+                "plugin entry is not a table",
+            ),
+        }
+        for name, (config, expected) in cases.items():
+            with self.subTest(name=name):
+                office = self.office()
+                project = Path(self.temp.name) / f"config-{name}"
+                project.mkdir()
+                home = Path(self.temp.name) / f"home-config-{name}"
+                config_path = home / ".codex/config.toml"
+                config_path.parent.mkdir(parents=True)
+                config_path.write_text(config, encoding="utf-8")
+                with patch(
+                    "agentpost.installer._integration_source", return_value=project
+                ):
+                    with patch("agentpost.installer.Path.home", return_value=home):
+                        with patch.dict("os.environ", {}, clear=True):
+                            with patch("agentpost.installer._run") as run:
+                                with self.assertRaisesRegex(
+                                    AgentPostError,
+                                    f"--confirm-codex-sessions-closed.*{expected}",
+                                ):
+                                    install(office, "codex", "cx", project)
+                run.assert_not_called()
+
+    def test_same_generation_codex_install_does_not_replace_live_cache(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "same-generation-project"
+        project.mkdir()
+        home = Path(self.temp.name) / "home-same-generation"
+        self._write_codex_install(home, CODEX_HOOK_GENERATION)
+        session_lock = CodexPluginLock(home)
+        self.assertTrue(session_lock.acquire_shared())
+        try:
+            with patch("agentpost.installer._integration_source", return_value=project):
+                with patch("agentpost.installer.Path.home", return_value=home):
+                    with patch.dict("os.environ", {"CODEX_THREAD_ID": "active-thread"}):
+                        with patch("agentpost.installer._run") as run:
+                            with redirect_stdout(StringIO()):
+                                install(office, "codex", "cx", project)
+        finally:
+            session_lock.release()
+
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertNotIn(["codex", "plugin", "remove", "agentpost@agentpost-local"], commands)
+        self.assertNotIn(["codex", "plugin", "add", "agentpost@agentpost-local"], commands)
 
     def test_uninstall_removes_only_owned_adapter_state(self) -> None:
         office = self.office()

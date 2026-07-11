@@ -151,10 +151,12 @@ def build_parser() -> argparse.ArgumentParser:
     connect.add_argument("agent", nargs="?")
     connect.add_argument("--cli", choices=("antigravity", "claude", "codex", "python"))
     connect.add_argument("--project", type=Path, default=Path.cwd())
+    connect.add_argument("--confirm-codex-sessions-closed", action="store_true")
     join = commands.add_parser("join")
     join.add_argument("agent", nargs="?")
     join.add_argument("--cli", choices=("antigravity", "claude", "codex", "python"))
     join.add_argument("--project", type=Path, default=Path.cwd())
+    join.add_argument("--confirm-codex-sessions-closed", action="store_true")
     disconnect = commands.add_parser("disconnect")
     disconnect.add_argument(
         "--cli", choices=("antigravity", "claude", "codex"), required=True
@@ -265,6 +267,11 @@ def build_parser() -> argparse.ArgumentParser:
     install_command.add_argument("cli", choices=("antigravity", "claude", "codex"))
     install_command.add_argument("--agent", required=True)
     install_command.add_argument("--project", type=Path, required=True)
+    install_command.add_argument(
+        "--confirm-codex-sessions-closed",
+        action="store_true",
+        help="confirm all unmanaged Codex sessions are closed before plugin replacement",
+    )
     doctor_command = commands.add_parser("doctor")
     doctor_command.add_argument("agent", nargs="?")
     doctor_command.add_argument("--project", type=Path, default=Path.cwd())
@@ -363,7 +370,13 @@ def main(argv: list[str] | None = None) -> int:
                 ).name
             )
         elif args.command in {"connect", "join"}:
-            return _join(office, args.agent, args.cli, args.project)
+            return _join(
+                office,
+                args.agent,
+                args.cli,
+                args.project,
+                confirm_codex_sessions_closed=args.confirm_codex_sessions_closed,
+            )
         elif args.command == "disconnect":
             if not office.unbind_agent(args.cli, args.project):
                 raise ValueError(
@@ -583,7 +596,13 @@ def main(argv: list[str] | None = None) -> int:
                 agent=args.agent,
             )
         elif args.command == "install":
-            install(office, args.cli, args.agent, args.project)
+            install(
+                office,
+                args.cli,
+                args.agent,
+                args.project,
+                confirm_codex_sessions_closed=args.confirm_codex_sessions_closed,
+            )
         elif args.command == "doctor":
             agent = args.agent or identify_agent(
                 office,
@@ -755,6 +774,8 @@ def _join(
     requested_agent: str | None,
     requested_cli: str | None,
     project: Path,
+    *,
+    confirm_codex_sessions_closed: bool = False,
 ) -> int:
     project = project.expanduser().resolve()
     agent = requested_agent or _infer_join_agent(office, project, requested_cli)
@@ -763,7 +784,13 @@ def _join(
     if cli == "python":
         office.bind_agent(agent, cli, project)
     else:
-        install(office, cli, agent, project)
+        install(
+            office,
+            cli,
+            agent,
+            project,
+            confirm_codex_sessions_closed=confirm_codex_sessions_closed,
+        )
     print(f"JOINED\t{agent}\t{cli}\t{project}")
     if cli == "python":
         print(

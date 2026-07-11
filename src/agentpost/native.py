@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .adapters import MailboxWatcher
 from .codex_generation import CODEX_HOOK_GENERATION, codex_hook_marker
+from .codex_lock import CodexPluginLock
 from .core import AgentPostError, PostOffice
 from .ownership import ConsumerLease
 from .presence import HEARTBEAT_INTERVAL_SECONDS
@@ -321,8 +322,18 @@ def codex_launch(
             "live-wake bridge; headless services should embed agentpost.AgentRuntime, "
             "while ordinary Codex lifecycle hooks provide next-boundary catch-up"
         )
+    plugin_lock = CodexPluginLock()
+    if not plugin_lock.acquire_shared():
+        raise AgentPostError(
+            "Codex cannot start while AgentPost is replacing the global Codex "
+            "plugin; retry after the install completes"
+        )
     lease = ConsumerLease(office, profile.name, "codex", cwd=cwd)
-    lease.require()
+    try:
+        lease.require()
+    except Exception:
+        plugin_lock.release()
+        raise
     marker = _codex_bridge_marker(office, profile.name)
     marker.parent.mkdir(parents=True, exist_ok=True)
     _atomic_json(
@@ -399,6 +410,7 @@ def codex_launch(
             _terminate(server)
         marker.unlink(missing_ok=True)
         lease.release()
+        plugin_lock.release()
 
 
 def claude_launch(
