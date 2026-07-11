@@ -7,6 +7,8 @@ import tempfile
 import threading
 import unittest
 import uuid
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -74,18 +76,33 @@ class PostOfficeTest(unittest.TestCase):
             office.register_profile(profile("private"))
             office.register_profile(profile("recipient"))
             result = office.send("private", "recipient", "owner only")
+            request = office.request_notification(
+                "private",
+                "recipient",
+                result.message_id,
+            )
+            project = Path(self.temp.name) / "private-project"
+            project.mkdir()
+            office.bind_agent("private", "python", project)
         finally:
             os.umask(original_umask)
 
-        for path in (root, root / "agents", root / "bindings"):
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
-        for path in (
-            root / "config.toml",
-            root / "agents" / "private" / "profile.toml",
-            result.recipient_path,
-            result.sent_path,
-        ):
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        for directory, _names, files in os.walk(root):
+            current = Path(directory)
+            self.assertEqual(stat.S_IMODE(current.stat().st_mode), 0o700)
+            for name in files:
+                self.assertEqual(
+                    stat.S_IMODE((current / name).stat().st_mode),
+                    0o600,
+                )
+        self.assertEqual(stat.S_IMODE(request.path.stat().st_mode), 0o600)
+        self.assertTrue(
+            tuple((root / "agents" / "recipient" / "adapter").glob("delivery-*.lock"))
+        )
+        self.assertEqual(
+            stat.S_IMODE((project / ".agentpost.toml").stat().st_mode),
+            0o600,
+        )
 
     def test_migrate_hardens_runtime_without_following_symlinks(self) -> None:
         delivered = self.office.send("cx", "k", "preserve bytes")
@@ -109,7 +126,9 @@ class PostOfficeTest(unittest.TestCase):
 
         actions = self.office.migrate()
 
-        self.assertIn("runtime permissions: owner-only", actions)
+        self.assertTrue(
+            any(action.startswith("runtime permissions: ") for action in actions)
+        )
         self.assertEqual({path: path.read_bytes() for path in durable_paths}, before)
         for directory, names, files in os.walk(self.root, followlinks=False):
             current = Path(directory)
@@ -120,6 +139,47 @@ class PostOfficeTest(unittest.TestCase):
                 if not path.is_symlink():
                     self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(external.stat().st_mode), 0o666)
+
+        second_actions = self.office.migrate()
+
+        self.assertFalse(
+            any(action.startswith("runtime permissions: ") for action in second_actions)
+        )
+        self.assertEqual({path: path.read_bytes() for path in durable_paths}, before)
+        for directory, names, files in os.walk(self.root, followlinks=False):
+            current = Path(directory)
+            self.assertEqual(stat.S_IMODE(current.stat().st_mode), 0o700)
+            names[:] = [name for name in names if not (current / name).is_symlink()]
+            for name in files:
+                path = current / name
+                if not path.is_symlink():
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(external.stat().st_mode), 0o666)
+
+    def test_migrate_continues_after_permission_hardening_failure(self) -> None:
+        blocked = self.root / "config.toml"
+        hardened = self.root / "agents" / "cx" / "profile.toml"
+        blocked.chmod(0o666)
+        hardened.chmod(0o666)
+        real_chmod = os.chmod
+
+        def selective_chmod(path: os.PathLike[str] | str, mode: int) -> None:
+            if Path(path) == blocked:
+                raise PermissionError("permission denied by test")
+            real_chmod(path, mode)
+
+        errors = StringIO()
+        with (
+            patch("agentpost.core.os.chmod", side_effect=selective_chmod),
+            redirect_stderr(errors),
+        ):
+            actions = self.office.migrate()
+
+        self.assertIn("runtime permissions: 1 tightened, 1 failed", actions)
+        self.assertIn(str(blocked), errors.getvalue())
+        self.assertIn("permission denied by test", errors.getvalue())
+        self.assertEqual(stat.S_IMODE(blocked.stat().st_mode), 0o666)
+        self.assertEqual(stat.S_IMODE(hardened.stat().st_mode), 0o600)
 
     def test_profiles_round_trip_and_scan(self) -> None:
         loaded = self.office.load_profile("cx")

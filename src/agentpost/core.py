@@ -5,6 +5,7 @@ import json
 import os
 import re
 import stat
+import sys
 import time
 import tomllib
 import uuid
@@ -46,6 +47,13 @@ class MessageNotFoundError(AgentPostError):
 
 class InvalidMessageError(AgentPostError):
     pass
+
+
+@dataclass(frozen=True)
+class _PermissionHardeningResult:
+    tightened: int
+    failed: int
+    errors: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -263,10 +271,23 @@ class PostOffice:
 
     def migrate(self) -> tuple[str, ...]:
         """Upgrade durable metadata without guessing ambiguous workspace defaults."""
+        permissions = (
+            _harden_runtime_permissions(self.root)
+            if self.root.exists()
+            else _PermissionHardeningResult(0, 0, ())
+        )
         self.initialize()
         actions = []
-        if _harden_runtime_permissions(self.root):
-            actions.append("runtime permissions: owner-only")
+        if permissions.tightened or permissions.failed:
+            actions.append(
+                "runtime permissions: "
+                f"{permissions.tightened} tightened, {permissions.failed} failed"
+            )
+        for error in permissions.errors:
+            print(
+                f"agentpost: warning: could not harden runtime permissions: {error}",
+                file=sys.stderr,
+            )
         for profile in self.list_profiles():
             if profile.version < 2:
                 self.register_profile(replace(profile, version=2))
@@ -964,15 +985,30 @@ def _atomic_write(path: Path, data: bytes) -> None:
 
 
 def _private_directory(path: Path, *, parents: bool = False) -> None:
+    existed = path.exists() or path.is_symlink()
     path.mkdir(parents=parents, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
     if path.is_symlink():
         raise AgentPostError(f"runtime directory must not be a symlink: {path}")
-    os.chmod(path, PRIVATE_DIRECTORY_MODE)
+    if not existed:
+        os.chmod(path, PRIVATE_DIRECTORY_MODE)
 
 
-def _harden_runtime_permissions(root: Path) -> bool:
-    changed = False
-    for directory, names, files in os.walk(root, topdown=True, followlinks=False):
+def _harden_runtime_permissions(root: Path) -> _PermissionHardeningResult:
+    tightened = 0
+    failed = 0
+    errors = []
+
+    def walk_error(error: OSError) -> None:
+        nonlocal failed
+        failed += 1
+        errors.append(str(error))
+
+    for directory, names, files in os.walk(
+        root,
+        topdown=True,
+        onerror=walk_error,
+        followlinks=False,
+    ):
         current = Path(directory)
         names[:] = [name for name in names if not (current / name).is_symlink()]
         for path, expected in (
@@ -983,6 +1019,10 @@ def _harden_runtime_permissions(root: Path) -> bool:
                 metadata = path.lstat()
             except FileNotFoundError:
                 continue
+            except OSError as exc:
+                failed += 1
+                errors.append(f"{path}: {exc}")
+                continue
             if stat.S_ISLNK(metadata.st_mode) or not (
                 stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)
             ):
@@ -992,9 +1032,24 @@ def _harden_runtime_permissions(root: Path) -> bool:
                     os.chmod(path, expected)
                 except FileNotFoundError:
                     continue
+                except OSError as exc:
+                    failed += 1
+                    errors.append(f"{path}: {exc}")
                 else:
-                    changed = True
-    return changed
+                    try:
+                        updated = path.lstat()
+                    except FileNotFoundError:
+                        continue
+                    except OSError as exc:
+                        failed += 1
+                        errors.append(f"{path}: {exc}")
+                        continue
+                    if stat.S_IMODE(updated.st_mode) == expected:
+                        tightened += 1
+                    else:
+                        failed += 1
+                        errors.append(f"{path}: chmod did not set mode {expected:o}")
+    return _PermissionHardeningResult(tightened, failed, tuple(errors))
 
 
 def _fsync_directory(path: Path) -> None:
