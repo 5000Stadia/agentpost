@@ -1,6 +1,6 @@
 # Founder Acceptance Checklist
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 This is the single manual release checklist for the local K/PB/C/Cx deployment.
 Automated tests remain the agents' responsibility. Check a manual item only
@@ -38,7 +38,7 @@ agents record them complete in `IMPLEMENTATION_STATUS.md`.
 - [ ] Prove partial-install and uninstall rollback: remove only AgentPost-owned
   integration state while preserving unrelated hooks/configuration, profiles,
   bindings, unread mail, read history, and sent history.
-- [ ] Reload the long-lived K, PB, and Construct Claude sessions onto the
+- [x] Reload the long-lived K, PB, and Construct Claude sessions onto the
   current plugin, then record restart catch-up, immediate delivery, and idle
   deferral for each.
 
@@ -155,10 +155,10 @@ agentpost doctor c  --project /home/k/Newproject     --cli claude
 - [x] All three doctors pass identity, mailbox, project, and current 0.0.5
   project-local plugin checks.
 - [x] Each agent receives one exact-ID restart catch-up letter.
-- [ ] Each agent receives one immediate letter while working without losing
+- [x] Each agent receives one immediate letter while working without losing
   its current task.
-- [ ] Each agent defers one idle letter until its current turn completes.
-- [ ] No test letter is processed twice, and every response correlates to the
+- [x] Each agent defers one idle letter until its current turn completes.
+- [x] No test letter is processed twice, and every response correlates to the
   original Message-ID.
 
 Queued fresh-load IDs:
@@ -206,8 +206,10 @@ first and sent correlated answer
 `<b959c4cb-93aa-4090-985b-892b2441b84d@agentpost.local>` entered C's existing
 real-work turn and produced correlated answer
 `<b52244bc-b114-482a-98c1-d5c9f7fdab43@agentpost.local>`. Idle probe
-`<824d6a3e-d608-4bef-84bc-8b49492ad72c@agentpost.local>` remains correctly
-deferred while that turn is still working.
+`<824d6a3e-d608-4bef-84bc-8b49492ad72c@agentpost.local>` did not interrupt
+that real-work turn; it arrived batched at the next Monitor wake after the
+active turn completed and produced correlated answer
+`<63257da5-9bd8-41dd-bc25-9df6ded6f4e5@agentpost.local>`.
 
 ## 4A. Antigravity adapter
 
