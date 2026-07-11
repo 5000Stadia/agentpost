@@ -10,7 +10,7 @@ after observing its stated result; record Message-IDs for mail-flow evidence.
 
 - [x] AgentPost 0.0.10 includes the managed Codex bridge startup correction;
   the earlier 0.0.9 generation-truth release is recorded at `69fa7db`.
-- [x] The full Python suite passes: 107 tests.
+- [x] The full Python suite passes: 108 tests.
 - [x] The suite also passes with unrelated `AGENTPOST_AGENT` and
   `AGENTPOST_ROOT` values inherited from another connected shell.
 - [x] A clean wheel install materializes the Claude, Codex, and Antigravity
@@ -20,6 +20,9 @@ after observing its stated result; record Message-IDs for mail-flow evidence.
 - [x] Isolated Codex acceptance observed current `SessionStart`,
   `UserPromptSubmit`, and `Stop` generation markers without claiming mail.
 - [x] Kernos independently returned implementation GREEN.
+- [x] Automated cold-start coverage queues mail with zero consumers, rotates
+  K, PB, C, and Cx through every first-member position, permits all four
+  mailbox-local leases concurrently, and verifies non-claiming catch-up.
 
 ## Agent-owned closeout
 
@@ -90,6 +93,10 @@ Launch from `/home/k/agentpost`:
 agentpost codex --agent cx
 ```
 
+Bridge startup evidence: 2026-07-10 — after the 0.0.10 fresh-install fix,
+`agentpost armed cx` reported `ARMED` with bridge pid 135853 and instance
+`d3ba30f6`.
+
 - [ ] **Idle mail while idle:** send one `--notify idle` question. Pass: one
   new turn starts after the idle boundary and processes the exact Message-ID.
 - [ ] **Immediate mail during a turn:** while Cx is visibly working, send one
@@ -151,6 +158,31 @@ Message-ID/result: __________________________
   queued capability without treating historical lifecycle markers as presence.
 
 Message-IDs/results: ________________________
+
+## 7. Zero-agent and first-member independence
+
+For each first member in the order K, PB, C, then Cx:
+
+- [ ] Close all four agent processes. Pass: `agentpost status` reports every
+  member offline, while `agentpost identities`, `list`, `read`, and durable
+  delivery still work without a daemon or coordinator.
+- [ ] Send one uniquely identified letter to the selected first member while
+  all members are closed. Pass: it commits to that mailbox with a queued
+  receipt.
+- [ ] Start only the selected member through its installed adapter. Pass: that
+  member becomes armed (or lifecycle-attached where the adapter honestly lacks
+  wake capability) and surfaces its exact queued Message-ID without requiring
+  any named peer to be online.
+- [ ] Stop that member before testing the next first-member case. Pass: no
+  stale presence or global owner prevents the next member from attaching.
+
+K-first evidence: ___________________________
+
+PB-first evidence: __________________________
+
+C-first evidence: ___________________________
+
+Cx-first evidence: __________________________
 
 ## Final release gate
 

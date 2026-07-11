@@ -106,6 +106,50 @@ class AdapterTest(unittest.TestCase):
         self.assertTrue(python.acquire())
         python.release()
 
+    def test_mailboxes_cold_start_independently_in_any_first_agent_order(self) -> None:
+        office = self.office()
+        for name in ("pb", "c"):
+            office.register_profile(profile(name))
+        agents = ("k", "pb", "c", "cx")
+        adapters = {
+            "k": "claude",
+            "pb": "claude",
+            "c": "claude",
+            "cx": "codex",
+        }
+        messages = {
+            name: office.send(
+                "cx" if name != "cx" else "k",
+                name,
+                f"queued for {name}",
+            )
+            for name in agents
+        }
+
+        # No consumer is needed for durable delivery. Every possible first
+        # member can then own its mailbox, and distinct mailboxes can all be
+        # live at once because ownership is mailbox-local rather than global.
+        for first in agents:
+            order = (first, *(name for name in agents if name != first))
+            leases = [ConsumerLease(office, name, adapters[name]) for name in order]
+            try:
+                self.assertTrue(all(lease.acquire() for lease in leases))
+                self.assertEqual(
+                    {lease.current_owner()["adapter"] for lease in leases},
+                    {"claude", "codex"},
+                )
+            finally:
+                for lease in reversed(leases):
+                    lease.release()
+
+        for name in agents:
+            pending = MailboxWatcher(office, name).pending()
+            self.assertEqual(
+                [item.letter.message_id for item in pending],
+                [messages[name].message_id],
+            )
+            self.assertEqual(len(office.list_messages(name, "unread")), 1)
+
     def test_consumer_lease_excludes_a_separate_process(self) -> None:
         office = self.office()
         owner = ConsumerLease(office, "k", "claude")

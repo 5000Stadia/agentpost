@@ -67,6 +67,14 @@ path-like agent names are rejected.
 
 ## Presence and routing
 
+AgentPost has no coordinator, leader, primary mailbox, or resident post-office
+process. The durable filesystem is the post office: when every agent process is
+closed, profiles and mail remain readable and writable, while presence honestly
+reports each member offline. Starting any registered member attaches only that
+member's mailbox and catches up its unread spool; it never requires Cx, K, or
+any other member to start first. Consumer locks are per mailbox, so different
+members may attach concurrently in any order.
+
 Presence is transient adapter data under `agents/AGENT/adapter/`, never part of
 the profile or message protocol. A fresh live heartbeat yields `idle` or
 `working`; no heartbeat yields `offline`. Presence probes aggregate live
