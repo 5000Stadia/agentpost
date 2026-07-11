@@ -351,6 +351,12 @@ load; managed Codex must attach its app-server bridge; ordinary Codex proves
 lifecycle-hook catch-up only; Antigravity proves hook injection at its first
 `PreInvocation`; and Python delegates turn creation to its host scheduler.
 
+Every native exact-ID pointer is self-sufficient when its optional skill is not
+available. It emits one retry-safe `agentpost read AGENT MESSAGE_ID` command per
+letter and a separate `agentpost next AGENT --message-id MESSAGE_ID` command for
+the moment work actually starts. Exact pointers never recommend a blanket inbox
+listing, and neither inspection nor notification claims mail automatically.
+
 ## Documentation
 
 - [Installation and recovery](docs/INSTALL.md)

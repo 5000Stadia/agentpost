@@ -26,6 +26,7 @@ from agentpost import (  # noqa: E402
     RecordingBell,
 )
 from agentpost.native import (  # noqa: E402
+    _antigravity_instruction,
     antigravity_hook,
     antigravity_launch,
     _claude_boundary_state,
@@ -735,7 +736,10 @@ lease.release()
                 project_roots=(str(project),),
             )
         )
-        sent = office.send("k", "cx", "review this")
+        sent = (
+            office.send("k", "cx", "review this"),
+            office.send("k", "cx", "and this"),
+        )
         event = StringIO(json.dumps({"cwd": str(project), "session_id": "session-1"}))
         output = StringIO()
         with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
@@ -747,8 +751,19 @@ lease.release()
         result = json.loads(output.getvalue())
         hook_output = result["hookSpecificOutput"]
         self.assertEqual(hook_output["hookEventName"], "UserPromptSubmit")
-        self.assertIn(sent.message_id, hook_output["additionalContext"])
-        self.assertEqual(len(office.list_messages("cx", "unread")), 1)
+        first_id, second_id = (item.message_id for item in sent)
+        self.assertEqual(
+            hook_output["additionalContext"],
+            f"AgentPost has 2 unread message(s) for cx: {first_id}, {second_id}. "
+            "Load the agentpost skill if available. Inspect exactly the listed "
+            f"Message-ID(s) with: `agentpost read cx '{first_id}'`; "
+            f"`agentpost read cx '{second_id}'`. Do not list, read, claim, or "
+            "process any other unread mail. Claim each only when starting its "
+            f"work with: `agentpost next cx --message-id '{first_id}'`; "
+            f"`agentpost next cx --message-id '{second_id}'`. Reply by Message-ID "
+            "when appropriate and give the user a short synopsis.",
+        )
+        self.assertEqual(len(office.list_messages("cx", "unread")), 2)
         observed = json.loads(
             codex_hook_marker(office, "cx", "user-prompt-submit").read_text()
         )
@@ -1547,6 +1562,61 @@ lease.release()
         self.assertEqual(len(office.list_messages("ag", "unread")), 2)
         self.assertEqual(agent_presence(office, "ag").state, "idle")
         self.assertFalse(armed(office, "ag")[0])
+
+    def test_antigravity_pointer_is_exact_and_commands_are_executable(self) -> None:
+        office = self.office()
+        sent = (
+            office.send("cx", "k", "first exact pointer"),
+            office.send("cx", "k", "second exact pointer"),
+        )
+        records = [office.read("k", item.message_id) for item in sent]
+        first_id, second_id = (item.message_id for item in sent)
+        instruction = _antigravity_instruction("k", records)
+        self.assertEqual(
+            instruction,
+            f"AgentPost has 2 unread message(s) for k: {first_id}, {second_id}. "
+            "Use the agentpost skill if available. Inspect exactly the listed "
+            f"Message-ID(s) with: `agentpost read k '{first_id}'`; "
+            f"`agentpost read k '{second_id}'`. Do not list, read, claim, or "
+            "process any other unread mail. Claim each only when starting its "
+            f"work with: `agentpost next k --message-id '{first_id}'`; "
+            f"`agentpost next k --message-id '{second_id}'`. Reply by Message-ID "
+            "when appropriate and give the user a short synopsis.",
+        )
+
+        commands = re.findall(r"`([^`]+)`", instruction)
+        reads, claims = commands[:2], commands[2:]
+        environment = {
+            **os.environ,
+            "AGENTPOST_ROOT": str(self.root),
+            "PYTHONPATH": str(Path(__file__).parents[1] / "src"),
+        }
+        for command in reads:
+            for _ in range(2):
+                result = subprocess.run(
+                    shlex.split(command),
+                    cwd=Path(self.temp.name),
+                    env=environment,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(office.list_messages("k", "unread")), 2)
+        self.assertEqual(office.list_messages("k", "read"), ())
+
+        for command in claims:
+            result = subprocess.run(
+                shlex.split(command),
+                cwd=Path(self.temp.name),
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(office.list_messages("k", "unread"), ())
+        self.assertEqual(len(office.list_messages("k", "read")), 2)
 
     def test_antigravity_output_failure_keeps_attention_retryable(self) -> None:
         office = self.office()

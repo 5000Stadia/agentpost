@@ -172,7 +172,29 @@ class DocumentationExampleTest(unittest.TestCase):
                 self.assertIsNotNone(turn)
                 instruction = turn["params"]["input"][0]["text"]
                 for message_id in message_ids:
-                    self.assertEqual(instruction.count(message_id), 1)
+                    self.assertEqual(instruction.count(message_id), 3)
+                    self.assertIn(
+                        f"`agentpost read cr '{message_id}'`",
+                        instruction,
+                    )
+                    self.assertIn(
+                        f"`agentpost next cr --message-id '{message_id}'`",
+                        instruction,
+                    )
+                read_positions = [
+                    instruction.index(f"`agentpost read cr '{message_id}'`")
+                    for message_id in message_ids
+                ]
+                claim_positions = [
+                    instruction.index(
+                        f"`agentpost next cr --message-id '{message_id}'`"
+                    )
+                    for message_id in message_ids
+                ]
+                self.assertEqual(read_positions, sorted(read_positions))
+                self.assertEqual(claim_positions, sorted(claim_positions))
+                self.assertNotIn("agentpost list", instruction)
+                self.assertIn("messages may be intentionally deferred", instruction)
                 deadline = time.monotonic() + 5
                 while startup_attention.path.exists() and time.monotonic() < deadline:
                     time.sleep(0.05)
@@ -227,7 +249,7 @@ class DocumentationExampleTest(unittest.TestCase):
                 self.assertIsNotNone(steer)
                 self.assertEqual(
                     steer["params"]["input"][0]["text"].count(deferred.message_id),
-                    1,
+                    3,
                 )
                 deadline = time.monotonic() + 5
                 while request_attention.path.exists() and time.monotonic() < deadline:

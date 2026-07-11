@@ -18,7 +18,7 @@ let pollRunning = false;
 socket.addEventListener("open", async () => {
   try {
     await request("initialize", {
-      clientInfo: { name: "agentpost", title: "AgentPost", version: "0.0.16" },
+      clientInfo: { name: "agentpost", title: "AgentPost", version: "0.0.17" },
       capabilities: {
         experimentalApi: true,
         requestAttestation: false,
@@ -152,13 +152,20 @@ async function refreshTurnId() {
 
 async function deliver(items, mode) {
   const ids = items.map((item) => item.message_id);
+  const reads = ids.map(
+    (id) => `agentpost read ${options.agent} ${quoteShell(id)}`,
+  );
+  const claims = ids.map(
+    (id) => `agentpost next ${options.agent} --message-id ${quoteShell(id)}`,
+  );
   const text =
     `AgentPost ${mode} mail is waiting for ${options.agent}: ${ids.join(", ")}. ` +
-    "Load the agentpost skill and process exactly the listed Message-ID(s). Do not " +
+    "Load the agentpost skill if available. Inspect exactly the listed " +
+    `Message-ID(s) with: ${reads.map(code).join("; ")}. Do not ` +
     "list, read, claim, or process any other unread mail during this turn; other " +
-    "messages may be intentionally deferred. Read and claim each listed message " +
-    "only when starting it, reply by Message-ID when appropriate, and give the " +
-    "user a short synopsis.";
+    "messages may be intentionally deferred. Claim each only when starting its " +
+    `work with: ${claims.map(code).join("; ")}. Reply by Message-ID when ` +
+    "appropriate and give the user a short synopsis.";
   const input = [{ type: "text", text, text_elements: [] }];
   if (active && turnId && mode === "immediate") {
     try {
@@ -194,6 +201,14 @@ async function deliver(items, mode) {
   trace("turn-start-request", { ids, mode, turnId });
   ids.forEach((id) => deferred.delete(id));
   await acknowledge(items);
+}
+
+function quoteShell(value) {
+  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
+}
+
+function code(value) {
+  return `\`${value}\``;
 }
 
 async function onIdle() {

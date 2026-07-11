@@ -155,12 +155,10 @@ def codex_hook(event_name: str, generation: str | None = None) -> int:
         if not unread:
             print("{}")
             return 0
-        pointers = ", ".join(record.letter.message_id for record in unread)
-        instruction = (
-            f"AgentPost has {len(unread)} unread message(s) for {profile.name}: "
-            f"{pointers}. Inspect with agentpost list/read, claim each only when "
-            "starting it, process the work, reply by Message-ID, and give the user "
-            "a short synopsis."
+        instruction = _exact_mail_instruction(
+            profile.name,
+            unread,
+            skill_instruction="Load the agentpost skill if available.",
         )
         hook_event_names = {
             "session-start": "SessionStart",
@@ -515,12 +513,48 @@ def _antigravity_empty_output(event_name: str) -> str:
 
 
 def _antigravity_instruction(agent: str, records: list) -> str:
+    return _exact_mail_instruction(
+        agent,
+        records,
+        skill_instruction="Use the agentpost skill if available.",
+    )
+
+
+def _exact_mail_instruction(
+    agent: str,
+    records: list,
+    *,
+    skill_instruction: str,
+) -> str:
     pointers = ", ".join(record.letter.message_id for record in records)
+    reads, claims = _mail_cli_commands(
+        agent,
+        [record.letter.message_id for record in records],
+    )
     return (
         f"AgentPost has {len(records)} unread message(s) for {agent}: {pointers}. "
-        "Use the agentpost skill. Inspect exactly these IDs, claim each only when "
-        "starting its work, reply by Message-ID, and give the user a short synopsis."
+        f"{skill_instruction} Inspect exactly the listed Message-ID(s) with: "
+        f"{'; '.join(f'`{command}`' for command in reads)}. Do not list, read, "
+        "claim, or process any other unread mail. Claim each only when starting "
+        f"its work with: {'; '.join(f'`{command}`' for command in claims)}. Reply "
+        "by Message-ID when appropriate and give the user a short synopsis."
     )
+
+
+def _mail_cli_commands(
+    agent: str,
+    message_ids: list[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    quoted_agent = shlex.quote(agent)
+    reads = tuple(
+        f"agentpost read {quoted_agent} {shlex.quote(message_id)}"
+        for message_id in message_ids
+    )
+    claims = tuple(
+        f"agentpost next {quoted_agent} --message-id {shlex.quote(message_id)}"
+        for message_id in message_ids
+    )
+    return reads, claims
 
 
 def _free_loopback_port() -> int:

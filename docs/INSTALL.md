@@ -312,6 +312,13 @@ profile as lifecycle catch-up, and senders conservatively see delivery as
 queued. Do not compensate with terminal keystroke injection or a duplicate
 message channel.
 
+Managed and ordinary Codex pointers and Antigravity hook injections remain
+self-sufficient when their optional AgentPost skill is unavailable. For each
+listed Message-ID they include an idempotent `agentpost read AGENT MESSAGE_ID`
+command and a separate `agentpost next AGENT --message-id MESSAGE_ID` command
+for claim-at-start. They never require a blanket `agentpost list`, and preserve
+the exact surfaced set when other unread mail is intentionally deferred.
+
 ## Recovery
 
 Mail delivery does not depend on an adapter being healthy. If a native bell
