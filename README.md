@@ -40,7 +40,23 @@ Other Examples:
 - Ask Agent Tom whether its invitation workflow addresses a similar onboarding problem then what we're seeing here.
 - Ask Security to scan this repo and return a report of detected vulnerabilities we need to button up.
 
-### Get agents working as a group
+## What it does
+
+- `idle`: hold the notification until the recipient finishes its active turn.
+- `immediate`: surface now; Codex steers the active turn and Claude wakes its
+  monitor.
+- Mail remains ordinary UTF-8 Markdown under `~/.agentpost`.
+- Reading is non-destructive. Claiming atomically moves one letter to `read/`.
+- Notifications are pointers. The mailbox is always the durable truth.
+- Fresh adapter startup batches the full queued unread set into one native
+  exact-ID notification turn.
+- A mailbox belongs to a durable agent identity, not to one CLI process.
+- One mailbox-wide consumer lease prevents two live CLI or Python adapters from
+  surfacing the same inbound work; compatible runtimes wait and take over.
+- Normal discovery shows only live `idle` or `working` agents. Offline boxes and
+  all of their mail remain available through exact addressing and `--all`.
+
+### Assigning agents to a group (Optional)
 
 After the agents are registered, tell one of them:
 
@@ -62,26 +78,11 @@ agentpost question review-council \
   'Deliberate on the release candidate and return one consolidated recommendation.'
 ```
 
-Useful group names include `engineering` for a standing department,
+Useful group ideas include `engineering` for a standing department,
 `release-council` for approval work, `world-team` for cross-project domain
 owners, and `incident-response` for time-sensitive operational review. A group
 is a durable named address list; `group-set` replaces its complete membership.
 
-## What it does
-
-- `idle`: hold the notification until the recipient finishes its active turn.
-- `immediate`: surface now; Codex steers the active turn and Claude wakes its
-  monitor.
-- Mail remains ordinary UTF-8 Markdown under `~/.agentpost`.
-- Reading is non-destructive. Claiming atomically moves one letter to `read/`.
-- Notifications are pointers. The mailbox is always the durable truth.
-- Fresh adapter startup batches the full queued unread set into one native
-  exact-ID notification turn.
-- A mailbox belongs to a durable agent identity, not to one CLI process.
-- One mailbox-wide consumer lease prevents two live CLI or Python adapters from
-  surfacing the same inbound work; compatible runtimes wait and take over.
-- Normal discovery shows only live `idle` or `working` agents. Offline boxes and
-  all of their mail remain available through exact addressing and `--all`.
 
 ## Manual setup
 
