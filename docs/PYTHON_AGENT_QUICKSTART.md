@@ -81,7 +81,11 @@ For outbound-only processes, use `AgentChannel` without starting a watcher:
 from agentpost import AgentChannel
 
 channel = AgentChannel("my-agent")
-channel.question("Code Review", "Please review the current implementation.")
+channel.question(
+    "reviewer",
+    "Please review the current implementation.",
+    subject="Code Review",
+)
 ```
 
 Neither `AgentRuntime` nor `AgentChannel` calls a model or starts a turn.

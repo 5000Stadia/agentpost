@@ -16,6 +16,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -41,11 +42,15 @@ class DocumentationExampleTest(unittest.TestCase):
         )
         pump_agentpost = namespace["pump_agentpost"]
         run_agentpost_turn = namespace["run_agentpost_turn"]
+        send_only_section = document.split("For outbound-only processes", 1)[1]
+        send_only_snippet = send_only_section.split("```python", 1)[1].split(
+            "```", 1
+        )[0]
 
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "post"
+            root = Path(temporary) / ".agentpost"
             office = PostOffice(root)
-            for name in ("sender", "my-agent"):
+            for name in ("sender", "my-agent", "reviewer"):
                 office.register_profile(
                     Profile(
                         name=name,
@@ -99,6 +104,25 @@ class DocumentationExampleTest(unittest.TestCase):
                         pass
 
             asyncio.run(scenario())
+
+            with patch.dict("os.environ", {"HOME": temporary}):
+                exec(
+                    compile(
+                        send_only_snippet,
+                        "docs/PYTHON_AGENT_QUICKSTART.md",
+                        "exec",
+                    ),
+                    {},
+                )
+            questions = office.list_messages("reviewer", "unread")
+            self.assertEqual(len(questions), 1)
+            self.assertEqual(questions[0].letter.from_agent, "my-agent")
+            self.assertEqual(questions[0].letter.kind, "question")
+            self.assertEqual(questions[0].letter.subject, "Code Review")
+            self.assertEqual(
+                questions[0].letter.body,
+                "Please review the current implementation.",
+            )
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_codex_bridge_batches_all_startup_unread_ids(self) -> None:
