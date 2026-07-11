@@ -361,7 +361,7 @@ lease.release()
         plugin_list = [
             {
                 "id": "agentpost@agentpost-local",
-                "version": "0.0.5",
+                "version": "0.0.6",
                 "enabled": True,
                 "projectPath": str(Path(self.temp.name) / "other"),
             },
@@ -383,12 +383,12 @@ lease.release()
         self.assertFalse(stale.ok)
         self.assertIn("stale version 0.0.4", stale.detail)
 
-        plugin_list[1]["version"] = "0.0.5"
+        plugin_list[1]["version"] = "0.0.6"
         completed.stdout = json.dumps(plugin_list)
         with patch("agentpost.installer.subprocess.run", return_value=completed):
             current = _doctor_claude(project)[0]
         self.assertTrue(current.ok)
-        self.assertEqual(_claude_plugin_version(), "0.0.5")
+        self.assertEqual(_claude_plugin_version(), "0.0.6")
 
     def test_codex_snapshot_is_machine_readable_and_non_claiming(self) -> None:
         office = self.office()
@@ -481,6 +481,10 @@ lease.release()
         for environment in child_environments:
             self.assertEqual(environment["AGENTPOST_AGENT"], "cr")
             self.assertEqual(environment["AGENTPOST_CODEX_BRIDGE"], "1")
+        self.assertEqual((server.returncode, bridge.returncode), (0, 0))
+        self.assertFalse(_codex_bridge_marker(office, "cr").exists())
+        self.assertFalse((office.root / "agents/cr/adapter/consumer.json").exists())
+        self.assertFalse(armed(office, "cr")[0])
 
     def test_codex_launcher_explains_interactive_only_requirement(self) -> None:
         office = self.office()

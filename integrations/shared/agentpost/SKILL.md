@@ -205,6 +205,15 @@ it into a legacy inbox. A legacy message may contain installation control or a
 pointer to an existing AgentPost Message-ID after a proven notification failure,
 but must not duplicate the work.
 
+Before sending a review request that cites repository artifacts, verify every
+commit exists and inspect the referenced diff. Claims about added or changed
+tests must include exact test node IDs or file-qualified test names when the
+framework supports them. Label any claim that was not directly verified as
+unverified. The receiver treats the repository diff as authoritative rather
+than trusting prose in the request. Do not heuristically infer artifact truth
+from prose; a future automated preflight must consume explicit structured
+commit, path, and test assertions and fail closed when one is absent.
+
 Legacy cutover is per agent. Migrate a project's durable communication policy
 only after that exact agent has proven inbound receipt/claim and outbound
 delivery. Its migration directive must make AgentPost primary, prohibit new

@@ -9,7 +9,7 @@ from .core import PostOffice
 
 
 CODEX_PLUGIN_ID = "agentpost@agentpost-local"
-CODEX_HOOK_GENERATION = "0.0.3+codex.20260710221500"
+CODEX_HOOK_GENERATION = "0.0.4+codex.20260711042958"
 CODEX_HOOK_EVENTS = ("session-start", "user-prompt-submit", "stop")
 
 

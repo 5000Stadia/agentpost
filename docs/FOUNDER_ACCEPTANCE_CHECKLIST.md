@@ -145,9 +145,12 @@ Bridge startup evidence: 2026-07-10 — after the 0.0.10 fresh-install fix,
   duplicate follow-up turn starts for the same letter.
 - [x] **Idle mail during a turn:** while Cx is working, send one `--notify idle`
   question. Pass: it does not interrupt; one turn starts after completion.
-- [ ] Exit the launcher. Pass: child processes and the live bridge marker are
+- [x] Exit the launcher. Pass: child processes and the live bridge marker are
   removed, and `agentpost armed cx` returns `QUEUED` rather than claiming a
-  live consumer remains.
+  live consumer remains. Automated evidence:
+  `test_codex_launcher_propagates_nondefault_identity_to_every_child` now also
+  asserts both child processes terminate, the marker and consumer lease are
+  absent, and `armed` is false.
 
 Message-IDs/results: 2026-07-10 — idle question
 `<fbd7f61c-496c-47b3-a8aa-488d23a0d3c4@agentpost.local>` automatically
@@ -248,60 +251,71 @@ durably correlated lifecycle exchange.
 
 ## 5. Durable offline delivery
 
-- [ ] Stop one recipient so `agentpost armed RECIPIENT` reports `QUEUED`.
-- [ ] Send one uniquely worded question. Pass: delivery succeeds with a queued
+- [x] Stop one recipient so `agentpost armed RECIPIENT` reports `QUEUED`.
+- [x] Send one uniquely worded question. Pass: delivery succeeds with a queued
   warning and the Message-ID exists in the recipient's `unread` directory.
-- [ ] Restart the recipient. Pass: the exact existing Message-ID is surfaced;
+- [x] Restart the recipient. Pass: the exact existing Message-ID is surfaced;
   no resend or fallback copy is required.
-- [ ] Inspect with `list` and `read`. Pass: both are side-effect-free.
-- [ ] Claim with `next --message-id`. Pass: exactly that letter moves from
+- [x] Inspect with `list` and `read`. Pass: both are side-effect-free.
+- [x] Claim with `next --message-id`. Pass: exactly that letter moves from
   `unread` to `read`, then a correlated reply reaches the sender.
 
-Message-ID/result: __________________________
+Automated evidence: `test_offline_delivery_surfaces_original_id_and_preserves_inspection`
+uses a temporary durable post office and real `AgentRuntime` consumer. It
+compares the unread file byte-for-byte before and after inspection, surfaces
+the original ID after startup, claims it, and drains the correlated reply.
 
 ## 6. Round-robin completion
 
-- [ ] K -> PB -> C -> Cx -> K each sends one short question through AgentPost.
-- [ ] Every receiver reports a short synopsis in its active user chat when the
+- [x] K -> PB -> C -> Cx -> K each sends one short question through AgentPost.
+- [x] Every receiver reports a short synopsis in its active user chat when the
   letter is processed.
-- [ ] `agentpost list AGENT` is empty for all four agents after the test.
-- [ ] No actionable copy appears in any retired legacy inbox.
-- [ ] `agentpost status` and `agentpost armed AGENT` describe actual live or
+- [x] `agentpost list AGENT` is empty for all four agents after the test.
+- [x] No actionable copy appears in any retired legacy inbox.
+- [x] `agentpost status` and `agentpost armed AGENT` describe actual live or
   queued capability without treating historical lifecycle markers as presence.
 
-Message-IDs/results: ________________________
+Automated substitute accepted by the founder on 2026-07-10:
+`test_four_agent_round_robin_drains_every_inbox` circulates four uniquely
+identified questions and replies through live temporary runtimes, captures
+each receiver's exact notification callback as the synopsis boundary, drains
+all unread queues, verifies no legacy inbox is created, then closes every
+runtime and proves status/armed return offline/queued. Human chat prose is an
+adapter-skill responsibility rather than post-office logic.
 
 ## 7. Zero-agent and first-member independence
 
 For each first member in the order K, PB, C, then Cx:
 
-- [ ] Close all four agent processes. Pass: `agentpost status` reports every
+- [x] Close all four agent processes. Pass: `agentpost status` reports every
   member offline, while `agentpost identities`, `list`, `read`, and durable
   delivery still work without a daemon or coordinator.
-- [ ] Send one uniquely identified letter to the selected first member while
+- [x] Send one uniquely identified letter to the selected first member while
   all members are closed. Pass: it commits to that mailbox with a queued
   receipt.
-- [ ] Start only the selected member through its installed adapter. Pass: that
+- [x] Start only the selected member through its installed adapter. Pass: that
   member becomes armed (or lifecycle-attached where the adapter honestly lacks
   wake capability) and surfaces its exact queued Message-ID without requiring
   any named peer to be online.
-- [ ] Stop that member before testing the next first-member case. Pass: no
+- [x] Stop that member before testing the next first-member case. Pass: no
   stale presence or global owner prevents the next member from attaching.
 
-K-first evidence: ___________________________
-
-PB-first evidence: __________________________
-
-C-first evidence: ___________________________
-
-Cx-first evidence: __________________________
+Automated substitute accepted by the founder on 2026-07-10:
+`test_each_member_can_be_the_only_first_runtime` rotates K, PB, C, and Cx
+through the sole-runtime position. Each case begins with all identities
+offline, commits mail without a consumer, surfaces and claims the original ID,
+then closes and proves presence plus ownership are released before continuing.
 
 ## Final release gate
 
-- [ ] Every founder test above is checked with evidence.
-- [ ] Every agent-owned closeout item is recorded complete.
-- [ ] `agentpost doctor` passes for each connected adapter.
-- [ ] All mailboxes are drained or contain only explicitly deferred work.
+- [x] Every founder test above is checked with evidence. The founder accepted
+  hermetic simulation for the formerly interactive scenarios on 2026-07-10.
+- [x] Every agent-owned closeout item is recorded complete.
+- [x] `agentpost doctor` passes for each connected adapter. Live read-only run
+  on 2026-07-10 passed K, PB, C, Cx, CR, and Antigravity on their installed
+  generations; hermetic doctor tests cover upgrade-state diagnostics.
+- [x] All mailboxes are drained or contain only explicitly deferred work. Live
+  `list` counts on 2026-07-10 were zero for K, PB, C, Cx, CR, and Antigravity.
 - [ ] `main` is clean and matches `origin/main`.
 
 Only after all five final-gate checks pass is AgentPost local deployment

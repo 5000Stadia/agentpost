@@ -11,8 +11,8 @@ are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
 
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
-`agentpost@agentpost-local` plugin at 0.0.5 installed; Cx runs Codex plugin
-generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.14.
+`agentpost@agentpost-local` plugin generation 0.0.6; Cx uses Codex plugin
+generation `0.0.4+codex.20260711042958`, and the Python package is at 0.0.14.
 Codex hook commands are stable across upgrades; a process that predates the
 user prompt hook must reload before that event becomes live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
