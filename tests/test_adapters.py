@@ -545,6 +545,51 @@ lease.release()
                 self.assertTrue(probe.acquire_exclusive())
                 probe.release()
 
+    def test_codex_launcher_releases_resources_when_child_termination_fails(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "termination-failure-project"
+        project.mkdir()
+        home = Path(self.temp.name) / "termination-failure-home"
+
+        class FakeProcess:
+            returncode = None
+
+            def poll(self):
+                return None
+
+        server = FakeProcess()
+        bridge = FakeProcess()
+        terminated = []
+
+        def terminate(process) -> None:
+            terminated.append(process)
+            if process is bridge:
+                raise OSError("simulated bridge termination failure")
+
+        with patch("agentpost.codex_lock.Path.home", return_value=home):
+            with patch("sys.stdin.isatty", return_value=True):
+                with patch("agentpost.native._free_loopback_port", return_value=4321):
+                    with patch("agentpost.native._wait_for_app_server"):
+                        with patch(
+                            "agentpost.native.subprocess.Popen",
+                            side_effect=[server, bridge],
+                        ):
+                            with patch("agentpost.native.subprocess.call", return_value=0):
+                                with patch(
+                                    "agentpost.native._terminate", side_effect=terminate
+                                ):
+                                    with self.assertRaisesRegex(
+                                        OSError, "bridge termination failure"
+                                    ):
+                                        codex_launch(office, project, [], agent="cx")
+
+        self.assertEqual(terminated, [bridge, server])
+        self.assertFalse(_codex_bridge_marker(office, "cx").exists())
+        self.assertFalse((office.root / "agents/cx/adapter/consumer.json").exists())
+        probe = CodexPluginLock(home)
+        self.assertTrue(probe.acquire_exclusive())
+        probe.release()
+
     def test_codex_plugin_lock_excludes_a_competing_process(self) -> None:
         home = Path(self.temp.name) / "cross-process-home"
         lock = CodexPluginLock(home)

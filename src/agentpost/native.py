@@ -404,17 +404,21 @@ def codex_launch(
     except FileNotFoundError as exc:
         raise AgentPostError(f"Codex adapter dependency not found: {exc.filename}") from exc
     finally:
-        if bridge is not None:
-            _terminate(bridge)
-        if server is not None:
-            _terminate(server)
         try:
-            marker.unlink(missing_ok=True)
+            if bridge is not None:
+                _terminate(bridge)
         finally:
             try:
-                lease.release()
+                if server is not None:
+                    _terminate(server)
             finally:
-                plugin_lock.release()
+                try:
+                    marker.unlink(missing_ok=True)
+                finally:
+                    try:
+                        lease.release()
+                    finally:
+                        plugin_lock.release()
 
 
 def claude_launch(
