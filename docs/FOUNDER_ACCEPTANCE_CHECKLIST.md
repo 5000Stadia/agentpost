@@ -8,8 +8,9 @@ after observing its stated result; record Message-IDs for mail-flow evidence.
 
 ## Automated evidence already complete
 
-- [x] AgentPost 0.0.9 is installed and pushed at `69fa7db`.
-- [x] The full Python suite passes: 106 tests.
+- [x] AgentPost 0.0.10 includes the managed Codex bridge startup correction;
+  the earlier 0.0.9 generation-truth release is recorded at `69fa7db`.
+- [x] The full Python suite passes: 107 tests.
 - [x] The suite also passes with unrelated `AGENTPOST_AGENT` and
   `AGENTPOST_ROOT` values inherited from another connected shell.
 - [x] A clean wheel install materializes the Claude, Codex, and Antigravity

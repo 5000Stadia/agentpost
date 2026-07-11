@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,42 @@ from agentpost.codex_generation import CODEX_HOOK_GENERATION  # noqa: E402
 
 
 class DocumentationExampleTest(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_codex_bridge_accepts_launcher_argument_names(self) -> None:
+        bridge = ROOT / "src" / "agentpost" / "data" / "codex_bridge.mjs"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = subprocess.run(
+                [
+                    "node",
+                    str(bridge),
+                    "--url",
+                    "ws://127.0.0.1:1",
+                    "--agent",
+                    "cx",
+                    "--root",
+                    str(root / "post"),
+                    "--cwd",
+                    str(root),
+                    "--log",
+                    str(root / "bridge.log"),
+                    "--presence",
+                    str(root / "presence.json"),
+                    "--owner-pid",
+                    "1",
+                    "--instance-id",
+                    "test-instance",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                timeout=5,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("app-server connection failed", result.stderr)
+        self.assertNotIn("missing --ownerPid", result.stderr)
+        self.assertNotIn("missing --instanceId", result.stderr)
+
     def test_codex_hooks_share_the_manifest_generation(self) -> None:
         plugin_root = ROOT / "integrations" / "codex" / "plugins" / "agentpost"
         manifest = json.loads(

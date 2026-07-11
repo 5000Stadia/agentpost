@@ -312,6 +312,12 @@ def codex_launch(
             ],
             cwd=cwd,
         )
+        time.sleep(0.1)
+        if bridge.poll() is not None:
+            raise AgentPostError(
+                f"Codex mailbox bridge exited during startup with status "
+                f"{bridge.returncode}"
+            )
         command = _codex_remote_command(url, codex_args)
         environment = os.environ.copy()
         environment["AGENTPOST_CODEX_BRIDGE"] = "1"

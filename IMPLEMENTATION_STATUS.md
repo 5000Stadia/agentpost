@@ -12,7 +12,7 @@ are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
 `agentpost@agentpost-local` plugin at 0.0.4 installed; Cx runs Codex plugin
-generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.9.
+generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.10.
 Codex hook commands are stable across upgrades; a process that predates the
 user prompt hook must reload before that event becomes live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
@@ -89,7 +89,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 106 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 107 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 
@@ -97,10 +97,11 @@ The final deployed-architecture council panel completed 3/3: K, PB, and
 Construct all returned GREEN with no blocking findings. PB's reply-urgency and
 presence-freshness polish was folded into 0.0.8.
 
-The 0.0.9 wheel was built and installed into a clean temporary virtual
+The 0.0.10 wheel was built and installed into a clean temporary virtual
 environment and home. Its Claude, Codex, and Antigravity integrations all
 materialized without the source checkout, and the installed CLI passed the
-executable two-agent smoke.
+executable two-agent smoke. The packaged Codex bridge accepts the launcher's
+kebab-case ownership arguments and fails a malformed startup visibly.
 
 Live acceptance passed on Claude Code 2.1.206 and Codex CLI 0.144.1. Claude
 proved restart catch-up, already-idle wake, and busy-turn idle deferral. Codex

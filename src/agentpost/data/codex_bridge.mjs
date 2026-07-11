@@ -18,7 +18,7 @@ let pollRunning = false;
 socket.addEventListener("open", async () => {
   try {
     await request("initialize", {
-      clientInfo: { name: "agentpost", title: "AgentPost", version: "0.0.9" },
+      clientInfo: { name: "agentpost", title: "AgentPost", version: "0.0.10" },
       capabilities: {
         experimentalApi: true,
         requestAttestation: false,
@@ -229,7 +229,10 @@ function notify(method, params = {}) {
 function parseArgs(args) {
   const parsed = {};
   for (let index = 0; index < args.length; index += 2) {
-    parsed[args[index].replace(/^--/, "")] = args[index + 1];
+    const key = args[index]
+      .replace(/^--/, "")
+      .replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    parsed[key] = args[index + 1];
   }
   for (const key of ["url", "agent", "root", "cwd", "log", "presence", "ownerPid", "instanceId"]) {
     if (!parsed[key]) throw new Error(`missing --${key}`);
