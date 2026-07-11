@@ -97,7 +97,7 @@ Bridge startup evidence: 2026-07-10 — after the 0.0.10 fresh-install fix,
 `agentpost armed cx` reported `ARMED` with bridge pid 135853 and instance
 `d3ba30f6`.
 
-- [ ] **Idle mail while idle:** send one `--notify idle` question. Pass: one
+- [x] **Idle mail while idle:** send one `--notify idle` question. Pass: one
   new turn starts after the idle boundary and processes the exact Message-ID.
 - [ ] **Immediate mail during a turn:** while Cx is visibly working, send one
   `--notify immediate` question. Pass: it steers the active turn once; no
@@ -108,7 +108,11 @@ Bridge startup evidence: 2026-07-10 — after the 0.0.10 fresh-install fix,
   removed, and `agentpost armed cx` returns `QUEUED` rather than claiming a
   live consumer remains.
 
-Message-IDs/results: ________________________
+Message-IDs/results: 2026-07-10 — idle question
+`<fbd7f61c-496c-47b3-a8aa-488d23a0d3c4@agentpost.local>` automatically
+started a turn without a user prompt; Cx claimed that exact Message-ID and sent
+correlated answer `<3c753249-984d-4859-a02c-10d53ca800fb@agentpost.local>`.
+Immediate steering and active-turn idle deferral remain pending.
 
 ## 4. Claude agents K, PB, and Construct
 
