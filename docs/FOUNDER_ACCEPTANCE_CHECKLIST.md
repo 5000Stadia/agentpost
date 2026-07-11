@@ -316,7 +316,8 @@ then closes and proves presence plus ownership are released before continuing.
   generations; hermetic doctor tests cover upgrade-state diagnostics.
 - [x] All mailboxes are drained or contain only explicitly deferred work. Live
   `list` counts on 2026-07-10 were zero for K, PB, C, Cx, CR, and Antigravity.
-- [ ] `main` is clean and matches `origin/main`.
+- [x] `main` is clean and matches `origin/main`. Release tree `d446c48` was
+  pushed and verified synchronized before this documentation-only closeout.
 
 Only after all five final-gate checks pass is AgentPost local deployment
 acceptance complete.
