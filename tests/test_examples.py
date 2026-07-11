@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import base64
 import hashlib
@@ -20,11 +21,85 @@ ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from agentpost.codex_generation import CODEX_HOOK_GENERATION  # noqa: E402
-from agentpost import PostOffice, Profile  # noqa: E402
+from agentpost import AgentRuntime, PostOffice, Profile  # noqa: E402
 from agentpost.installer import _claude_plugin_version  # noqa: E402
 
 
 class DocumentationExampleTest(unittest.TestCase):
+    def test_python_quickstart_async_bridge_preserves_claim_boundary(self) -> None:
+        document = (ROOT / "docs/PYTHON_AGENT_QUICKSTART.md").read_text(
+            encoding="utf-8"
+        )
+        bridge_section = document.split("## 2. Bridge mail into the host scheduler", 1)[
+            1
+        ]
+        snippet = bridge_section.split("```python", 1)[1].split("```", 1)[0]
+        namespace: dict[str, object] = {}
+        exec(
+            compile(snippet, "docs/PYTHON_AGENT_QUICKSTART.md", "exec"),
+            namespace,
+        )
+        pump_agentpost = namespace["pump_agentpost"]
+        run_agentpost_turn = namespace["run_agentpost_turn"]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "post"
+            office = PostOffice(root)
+            for name in ("sender", "my-agent"):
+                office.register_profile(
+                    Profile(
+                        name=name,
+                        display_name=name,
+                        cli="python",
+                        kind="project",
+                        summary=f"Python quick-start {name}",
+                        projects=(f"{name}-project",),
+                    )
+                )
+
+            async def scenario() -> None:
+                jobs = asyncio.Queue()
+                async with AgentRuntime(
+                    "my-agent",
+                    root=root,
+                    interval=0.01,
+                ) as runtime:
+                    pump = asyncio.create_task(pump_agentpost(runtime, jobs))
+                    sent = office.send("sender", "my-agent", "Review this")
+                    notice = await asyncio.wait_for(jobs.get(), timeout=1)
+                    inspected = office.read("my-agent", notice.message_id)
+                    self.assertEqual(inspected.state, "unread")
+                    self.assertEqual(
+                        office.read("my-agent", notice.message_id).state,
+                        "unread",
+                    )
+
+                    async def handle(body: str) -> str:
+                        self.assertEqual(body, "Review this")
+                        return "Reviewed"
+
+                    await run_agentpost_turn(runtime, notice, handle)
+                    self.assertEqual(office.list_messages("my-agent", "unread"), ())
+                    self.assertEqual(len(office.list_messages("my-agent", "read")), 1)
+                    replies = office.list_messages("sender", "unread")
+                    self.assertEqual(len(replies), 1)
+                    received_reply = replies[0]
+                    self.assertEqual(
+                        received_reply.letter.in_reply_to,
+                        sent.message_id,
+                    )
+                    self.assertEqual(
+                        received_reply.letter.body,
+                        "Reviewed",
+                    )
+                    pump.cancel()
+                    try:
+                        await pump
+                    except asyncio.CancelledError:
+                        pass
+
+            asyncio.run(scenario())
+
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_codex_bridge_batches_all_startup_unread_ids(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -1,5 +1,9 @@
 # Python agent-system integration
 
+For the shortest host-framework-neutral setup, start with the
+[Python agent quick start](PYTHON_AGENT_QUICKSTART.md). This page is the full
+runtime and recovery reference.
+
 `AgentRuntime` is the CLI-neutral AgentPost adapter for Python orchestrators.
 It embeds in the host process and has no dependencies beyond the Python
 standard library.

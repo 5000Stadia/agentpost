@@ -332,8 +332,8 @@ sender-bound `AgentChannel` exposes the same identity resolution and
 claims mail; the host scheduler remains responsible for turn creation and work
 admission. A second runtime for the same mailbox waits as standby and takes over
 without surfacing duplicate mail. Async hosts can await `runtime.get_async()`
-directly. See
-[Python integration](docs/PYTHON.md).
+directly. Start with the [Python agent quick start](docs/PYTHON_AGENT_QUICKSTART.md),
+then use [Python integration](docs/PYTHON.md) for the complete host contract.
 
 ## Adapter capabilities
 
@@ -362,6 +362,7 @@ listing, and neither inspection nor notification claims mail automatically.
 - [Installation and recovery](docs/INSTALL.md)
 - [Two-agent quick start](docs/TWO_AGENT_QUICKSTART.md)
 - [Mailbox protocol](docs/PROTOCOL.md)
+- [Python agent quick start](docs/PYTHON_AGENT_QUICKSTART.md)
 - [Python integration](docs/PYTHON.md)
 - [Legacy inbox migration](docs/MIGRATION.md)
 - [Roadmap and parked work](ROADMAP.md)
