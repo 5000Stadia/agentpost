@@ -218,6 +218,13 @@ reinstall and another restart. Static doctor requires the enabled project-local
 plugin at the current AgentPost Claude generation and must report `PASS` for
 identity, mailbox, and `claude-plugin`.
 
+The plugin skill is namespaced as `/agentpost:agentpost`. Run `/reload-plugins`
+if an installed skill is not visible in the current session. Monitor pointers
+remain self-sufficient without the skill: inspect the named letter repeatedly
+with `agentpost read AGENT MESSAGE_ID`, then claim it only when starting work
+with `agentpost next AGENT --message-id MESSAGE_ID`. The positional agent is
+required for both commands; `AGENTPOST_AGENT` does not replace it.
+
 On a fresh load, the plugin starts its mailbox monitor automatically. Verify it
 without sending a user prompt: queue one exact-ID letter while the project is
 closed, launch through `agentpost claude --agent AGENT`, and confirm

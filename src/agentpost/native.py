@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import select
+import shlex
 import socket
 import subprocess
 import sys
@@ -101,10 +102,10 @@ def claude_monitor() -> int:
                 if record.letter.notify == "idle" and state == "busy":
                     deferred.append(record)
                 else:
-                    _emit_claude(record)
+                    _emit_claude(profile.name, record)
             if state == "idle" and deferred:
                 for record in deferred:
-                    _emit_claude(record)
+                    _emit_claude(profile.name, record)
                 deferred.clear()
             time.sleep(watcher.interval)
     finally:
@@ -592,11 +593,25 @@ def _claude_boundary_state(office: PostOffice, agent: str) -> str:
     return value if value in {"busy", "idle"} else "idle"
 
 
-def _emit_claude(record) -> None:
+def _emit_claude(agent: str, record) -> None:
     letter = record.letter
+    inspect_command = " ".join(
+        ("agentpost read", shlex.quote(agent), shlex.quote(letter.message_id))
+    )
+    claim_command = " ".join(
+        (
+            "agentpost next",
+            shlex.quote(agent),
+            "--message-id",
+            shlex.quote(letter.message_id),
+        )
+    )
     print(
         f"AgentPost {letter.notify} mail {letter.message_id} from "
-        f"{letter.from_agent}. Process exactly this Message-ID with the "
-        "agentpost skill; do not inspect unrelated unread mail.",
+        f"{letter.from_agent} for {agent}. Load `/agentpost:agentpost` if available; "
+        f"otherwise inspect exactly this message with `{inspect_command}`. Do not "
+        "list, read, claim, or process any other unread mail. Claim only when "
+        f"starting its work with `{claim_command}`. Reply by Message-ID when "
+        "appropriate and give the user a short synopsis.",
         flush=True,
     )

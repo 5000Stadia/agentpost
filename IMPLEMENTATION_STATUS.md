@@ -12,7 +12,7 @@ are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
 `agentpost@agentpost-local` plugin generation 0.0.6; Cx uses Codex plugin
-generation `0.0.4+codex.20260711042958`, and the Python package is at 0.0.15.
+generation `0.0.4+codex.20260711042958`, and the Python package is at 0.0.16.
 Codex hook commands are stable across upgrades; a process that predates the
 user prompt hook must reload before that event becomes live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
@@ -36,7 +36,8 @@ or the original data directories.
 - CLI smoke coverage for discovery, group ask/reply, and panel rendering.
 - Bell-adapter interface, deterministic fake, and token-free mailbox watcher.
 - Claude Code marketplace plugin with a live monitor, exact catch-up,
-  immediate wake, and delayed idle-boundary behavior.
+  immediate wake, delayed idle-boundary behavior, and self-sufficient
+  idempotent CLI pointers when its optional namespaced skill is unavailable.
 - Codex plugin plus `agentpost codex` loopback app-server binding with live
   catch-up, `turn/steer`, idle deferral, exact-ID processing, and fallback-hook
   ownership suppression.
@@ -106,7 +107,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 147 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 149 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 

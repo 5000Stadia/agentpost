@@ -275,7 +275,9 @@ idle.
   native monitor event only when unread mail appears. Lifecycle hooks maintain
   a short busy/idle boundary in the mailbox's AgentPost adapter directory. A
   fresh Claude load starts the monitor automatically; no model call is made
-  until mail causes a native event.
+  until mail causes a native event. The event names the optional
+  `/agentpost:agentpost` skill and includes exact positional `read` and `next`
+  commands, so inspection remains retry-safe when the skill is unavailable.
 - `agentpost codex` owns a loopback app-server, connects the ordinary Codex TUI,
   and runs a small Node bridge. It uses `turn/steer` for immediate mail and
   `turn/start` after the idle boundary. For ordinary Codex launches, plugin

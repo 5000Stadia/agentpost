@@ -6,6 +6,8 @@ import time
 import unittest
 import json
 import os
+import re
+import shlex
 import subprocess
 import tomllib
 from contextlib import redirect_stdout
@@ -27,6 +29,7 @@ from agentpost.native import (  # noqa: E402
     antigravity_hook,
     antigravity_launch,
     _claude_boundary_state,
+    _emit_claude,
     _codex_bridge_marker,
     _codex_remote_command,
     claude_boundary,
@@ -263,6 +266,85 @@ lease.release()
         self.assertEqual(watcher.pending(), ())
         self.assertEqual(office.notification_requests("k"), ())
         self.assertEqual(len(office.list_messages("k", "unread")), 1)
+
+    def test_claude_pointer_is_exact_and_self_sufficient(self) -> None:
+        office = self.office()
+        sent = office.send("cx", "k", "Inspect this safely.")
+        record = office.read("k", sent.message_id)
+        output = StringIO()
+        with redirect_stdout(output):
+            _emit_claude("k", record)
+
+        self.assertEqual(
+            output.getvalue().strip(),
+            f"AgentPost idle mail {sent.message_id} from cx for k. Load "
+            "`/agentpost:agentpost` if available; otherwise inspect exactly this "
+            f"message with `agentpost read k '{sent.message_id}'`. Do not list, "
+            "read, claim, or process any other unread mail. Claim only when "
+            f"starting its work with `agentpost next k --message-id "
+            f"'{sent.message_id}'`. Reply by Message-ID when appropriate and give "
+            "the user a short synopsis.",
+        )
+
+    def test_claude_pointer_read_is_retry_safe_before_explicit_claim(self) -> None:
+        office = self.office()
+        sent = office.send("cx", "k", "Read twice, claim once.", notify="immediate")
+        output = StringIO()
+        with redirect_stdout(output):
+            _emit_claude("k", office.read("k", sent.message_id))
+        commands = re.findall(r"`([^`]+)`", output.getvalue())
+        self.assertEqual(commands[0], "/agentpost:agentpost")
+        self.assertEqual(
+            commands[1], f"agentpost read k '{sent.message_id}'"
+        )
+        self.assertEqual(
+            commands[2], f"agentpost next k --message-id '{sent.message_id}'"
+        )
+
+        environment = {
+            **os.environ,
+            "AGENTPOST_ROOT": str(self.root),
+            "PYTHONPATH": str(Path(__file__).parents[1] / "src"),
+        }
+        for _ in range(2):
+            result = subprocess.run(
+                shlex.split(commands[1]),
+                cwd=Path(self.temp.name),
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(sent.message_id, result.stdout)
+            self.assertEqual(len(office.list_messages("k", "unread")), 1)
+            self.assertEqual(office.list_messages("k", "read"), ())
+
+        claimed = subprocess.run(
+            shlex.split(commands[2]),
+            cwd=Path(self.temp.name),
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(claimed.returncode, 0, claimed.stderr)
+        self.assertEqual(office.list_messages("k", "unread"), ())
+        self.assertEqual(len(office.list_messages("k", "read")), 1)
+
+        repeated_claim = subprocess.run(
+            shlex.split(commands[2]),
+            cwd=Path(self.temp.name),
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(repeated_claim.returncode, 1)
+        self.assertRegex(
+            repeated_claim.stderr,
+            "unread message not found|already claimed",
+        )
 
     def test_idle_waits_for_completion_while_immediate_surfaces(self) -> None:
         bell = BoundaryBell()
