@@ -289,6 +289,26 @@ class JoinCommandTest(unittest.TestCase):
         self.assertEqual(args[1:], ("codex", "app", self.project))
         self.assertEqual(kwargs, {"confirm_codex_sessions_closed": True})
 
+    def test_codex_uninstall_forwards_session_close_confirmation(self) -> None:
+        with patch("agentpost.cli.uninstall") as uninstall:
+            result = main(
+                [
+                    "--root",
+                    str(self.root),
+                    "uninstall",
+                    "codex",
+                    "--project",
+                    str(self.project),
+                    "--confirm-codex-sessions-closed",
+                ]
+            )
+        self.assertEqual(result, 0)
+        uninstall.assert_called_once_with(
+            "codex",
+            self.project,
+            confirm_codex_sessions_closed=True,
+        )
+
     def test_identities_and_resolve_expose_the_address_book(self) -> None:
         identities = StringIO()
         with redirect_stdout(identities):

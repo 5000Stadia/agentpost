@@ -333,11 +333,14 @@ only for installation control or a pointer to the existing Message-ID.
 
 ```sh
 agentpost uninstall claude --project /work/docs
-agentpost uninstall codex --project /work/application
+agentpost uninstall codex --project /work/application \
+  --confirm-codex-sessions-closed
 agentpost uninstall antigravity --project /work/application
 ```
 
 Uninstall removes only the CLI plugin registration. The post office, profiles,
 groups, sent archive, unread mail, and read history are retained. Remove the
 core virtual environment and `~/.agentpost` only as a separate, explicit data
-destruction operation.
+destruction operation. Before Codex uninstall, close every Codex session and
+run the command from a terminal; removal uses the same exclusive plugin lock as
+generation replacement and rejects an active Codex thread.

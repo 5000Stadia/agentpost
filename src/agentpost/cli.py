@@ -281,6 +281,11 @@ def build_parser() -> argparse.ArgumentParser:
     uninstall_command = commands.add_parser("uninstall")
     uninstall_command.add_argument("cli", choices=("antigravity", "claude", "codex"))
     uninstall_command.add_argument("--project", type=Path, required=True)
+    uninstall_command.add_argument(
+        "--confirm-codex-sessions-closed",
+        action="store_true",
+        help="confirm all unmanaged Codex sessions are closed before plugin removal",
+    )
     armed_command = commands.add_parser("armed")
     armed_command.add_argument("agent")
     return parser
@@ -615,7 +620,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{'PASS' if check.ok else 'FAIL'}\t{check.name}\t{check.detail}")
             return 0 if all(check.ok for check in checks) else 1
         elif args.command == "uninstall":
-            uninstall(args.cli, args.project)
+            uninstall(
+                args.cli,
+                args.project,
+                confirm_codex_sessions_closed=args.confirm_codex_sessions_closed,
+            )
         elif args.command == "armed":
             is_armed, detail = armed(office, args.agent)
             print(f"{'ARMED' if is_armed else 'QUEUED'}\t{args.agent}\t{detail}")

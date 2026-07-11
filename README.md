@@ -187,8 +187,8 @@ agentpost codex --agent engineer
 agentpost doctor
 ```
 
-When replacing an existing Codex plugin generation, first close every Codex
-session and run the install from a terminal with
+When replacing or removing an existing Codex plugin generation, first close
+every Codex session and run the operation from a terminal with
 `--confirm-codex-sessions-closed`. AgentPost coordinates managed launches with
 a process lock, but Codex does not expose all ordinary unmanaged sessions for
 automatic enumeration. A same-generation install leaves the live cache intact.

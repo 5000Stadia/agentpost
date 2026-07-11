@@ -56,10 +56,10 @@ or the original data directories.
   commands.
 - Transactional adapter binding: failed setup records no false workspace
   connection, and failed Codex setup restores the original user-hook document.
-- Managed Codex sessions and plugin replacement coordinate through a global
-  shared/exclusive lock; replacement also requires an explicit terminal
-  acknowledgement for unmanaged-session quiescence, while same-generation
-  installs leave the cache intact.
+- Managed Codex sessions coordinate with plugin replacement and removal through
+  a global shared/exclusive lock; destructive operations also require explicit
+  terminal acknowledgement for unmanaged-session quiescence, while
+  same-generation installs leave the cache intact.
 - Hermetic clean-bootstrap verification runs through the real installer in the
   Python 3.11, 3.12, and 3.13 CI matrix; idempotent reinstall preserves runtime
   state.

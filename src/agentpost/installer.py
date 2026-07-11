@@ -155,8 +155,18 @@ def install(
             pass
 
 
-def uninstall(cli: str, project: Path) -> None:
+def uninstall(
+    cli: str,
+    project: Path,
+    *,
+    confirm_codex_sessions_closed: bool = False,
+) -> None:
     project = project.expanduser().resolve()
+    plugin_lock = None
+    if cli == "codex":
+        plugin_lock = _codex_destructive_operation_lock(
+            confirm_sessions_closed=confirm_codex_sessions_closed,
+        )
     if cli == "claude":
         _run(
             [
@@ -172,12 +182,15 @@ def uninstall(cli: str, project: Path) -> None:
             allow_missing=True,
         )
     elif cli == "codex":
-        _remove_codex_user_hook()
-        _run(
-            ["codex", "plugin", "remove", "agentpost@agentpost-local"],
-            cwd=project,
-            allow_missing=True,
-        )
+        try:
+            _remove_codex_user_hook()
+            _run(
+                ["codex", "plugin", "remove", "agentpost@agentpost-local"],
+                cwd=project,
+                allow_missing=True,
+            )
+        finally:
+            plugin_lock.release()
     elif cli == "antigravity":
         _run(
             ["agy", "plugin", "uninstall", "agentpost"],
@@ -710,6 +723,31 @@ def _require_codex_replacement_acknowledgement(
             "Codex session is closed; rerun from a terminal with "
             f"--confirm-codex-sessions-closed (installed state: {state.detail})"
         )
+
+
+def _codex_destructive_operation_lock(
+    *,
+    confirm_sessions_closed: bool,
+    home: Path | None = None,
+) -> CodexPluginLock:
+    if os.environ.get("CODEX_THREAD_ID"):
+        raise AgentPostError(
+            "Codex plugin removal cannot run inside a Codex thread; close all "
+            "Codex sessions and run it from a terminal"
+        )
+    if not confirm_sessions_closed:
+        raise AgentPostError(
+            "Codex plugin removal requires confirmation that every unmanaged "
+            "Codex session is closed; rerun from a terminal with "
+            "--confirm-codex-sessions-closed"
+        )
+    lock = CodexPluginLock(home or Path.home())
+    if lock.acquire_exclusive():
+        return lock
+    raise AgentPostError(
+        "Codex plugin removal is blocked by a managed Codex session; close all "
+        "Codex sessions and retry from a terminal"
+    )
 
 
 def _codex_install_plan(

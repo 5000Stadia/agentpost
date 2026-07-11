@@ -520,6 +520,31 @@ lease.release()
         finally:
             lock.release()
 
+    def test_codex_launcher_releases_resources_after_early_setup_failures(self) -> None:
+        for failure in ("_atomic_json", "_free_loopback_port"):
+            with self.subTest(failure=failure):
+                office = self.office()
+                project = Path(self.temp.name) / f"early-failure-{failure}"
+                project.mkdir()
+                home = Path(self.temp.name) / f"home-{failure}"
+                with patch("agentpost.codex_lock.Path.home", return_value=home):
+                    with patch("sys.stdin.isatty", return_value=True):
+                        with patch(
+                            f"agentpost.native.{failure}",
+                            side_effect=OSError("simulated early failure"),
+                        ):
+                            with patch("agentpost.native.subprocess.Popen") as popen:
+                                with self.assertRaisesRegex(OSError, "simulated"):
+                                    codex_launch(office, project, [], agent="cx")
+                popen.assert_not_called()
+                self.assertFalse(_codex_bridge_marker(office, "cx").exists())
+                self.assertFalse(
+                    (office.root / "agents/cx/adapter/consumer.json").exists()
+                )
+                probe = CodexPluginLock(home)
+                self.assertTrue(probe.acquire_exclusive())
+                probe.release()
+
     def test_codex_plugin_lock_excludes_a_competing_process(self) -> None:
         home = Path(self.temp.name) / "cross-process-home"
         lock = CodexPluginLock(home)
@@ -1122,10 +1147,15 @@ lease.release()
         before = tree()
         marker = (project / ".agentpost.toml").read_bytes()
         with patch("agentpost.installer.Path.home", return_value=home):
-            with patch("agentpost.installer._run") as run:
-                uninstall("codex", project)
-                uninstall("claude", project)
-                uninstall("antigravity", project)
+            with patch.dict("os.environ", {}, clear=True):
+                with patch("agentpost.installer._run") as run:
+                    uninstall(
+                        "codex",
+                        project,
+                        confirm_codex_sessions_closed=True,
+                    )
+                    uninstall("claude", project)
+                    uninstall("antigravity", project)
 
         self.assertEqual(tree(), before)
         self.assertEqual((project / ".agentpost.toml").read_bytes(), marker)
@@ -1149,6 +1179,53 @@ lease.release()
                 ["agy", "plugin", "uninstall", "agentpost"],
             ],
         )
+
+    def test_codex_uninstall_requires_quiescence_before_any_mutation(self) -> None:
+        project = Path(self.temp.name) / "blocked-uninstall-project"
+        project.mkdir()
+        cases = ("thread", "confirmation", "managed")
+        for case in cases:
+            with self.subTest(case=case):
+                home = Path(self.temp.name) / f"blocked-uninstall-{case}"
+                hooks_path = home / ".codex/hooks.json"
+                hooks_path.parent.mkdir(parents=True)
+                hooks_path.write_text(
+                    '{"hooks":{"UserPromptSubmit":[{"hooks":'
+                    '[{"command":"agentpost internal-codex-hook '
+                    'user-prompt-submit"}]}]}}\n',
+                    encoding="utf-8",
+                )
+                original_hooks = hooks_path.read_bytes()
+                session_lock = None
+                if case == "managed":
+                    session_lock = CodexPluginLock(home)
+                    self.assertTrue(session_lock.acquire_shared())
+                try:
+                    environment = (
+                        {"CODEX_THREAD_ID": "active-thread"}
+                        if case == "thread"
+                        else {}
+                    )
+                    confirmed = case != "confirmation"
+                    expected = {
+                        "thread": "cannot run inside a Codex thread",
+                        "confirmation": "--confirm-codex-sessions-closed",
+                        "managed": "blocked by a managed Codex session",
+                    }[case]
+                    with patch("agentpost.installer.Path.home", return_value=home):
+                        with patch.dict("os.environ", environment, clear=True):
+                            with patch("agentpost.installer._run") as run:
+                                with self.assertRaisesRegex(AgentPostError, expected):
+                                    uninstall(
+                                        "codex",
+                                        project,
+                                        confirm_codex_sessions_closed=confirmed,
+                                    )
+                    run.assert_not_called()
+                    self.assertEqual(hooks_path.read_bytes(), original_hooks)
+                finally:
+                    if session_lock is not None:
+                        session_lock.release()
 
     def test_codex_install_re_registers_hooks_on_every_generation(self) -> None:
         office = self.office()

@@ -335,25 +335,25 @@ def codex_launch(
         plugin_lock.release()
         raise
     marker = _codex_bridge_marker(office, profile.name)
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_json(
-        marker,
-        {
-            "pid": os.getpid(),
-            "updated_at": time.time(),
-            "state": "idle",
-            "instance_id": lease.instance_id,
-            "adapter": "codex",
-        },
-    )
-    port = _free_loopback_port()
-    url = f"ws://127.0.0.1:{port}"
-    environment = os.environ.copy()
-    environment["AGENTPOST_CODEX_BRIDGE"] = "1"
-    environment["AGENTPOST_AGENT"] = profile.name
     server = None
     bridge = None
     try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_json(
+            marker,
+            {
+                "pid": os.getpid(),
+                "updated_at": time.time(),
+                "state": "idle",
+                "instance_id": lease.instance_id,
+                "adapter": "codex",
+            },
+        )
+        port = _free_loopback_port()
+        url = f"ws://127.0.0.1:{port}"
+        environment = os.environ.copy()
+        environment["AGENTPOST_CODEX_BRIDGE"] = "1"
+        environment["AGENTPOST_AGENT"] = profile.name
         server = subprocess.Popen(
             ["codex", "app-server", "--listen", url],
             cwd=cwd,
@@ -408,9 +408,13 @@ def codex_launch(
             _terminate(bridge)
         if server is not None:
             _terminate(server)
-        marker.unlink(missing_ok=True)
-        lease.release()
-        plugin_lock.release()
+        try:
+            marker.unlink(missing_ok=True)
+        finally:
+            try:
+                lease.release()
+            finally:
+                plugin_lock.release()
 
 
 def claude_launch(
