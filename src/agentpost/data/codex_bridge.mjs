@@ -18,7 +18,7 @@ let pollRunning = false;
 socket.addEventListener("open", async () => {
   try {
     await request("initialize", {
-      clientInfo: { name: "agentpost", title: "AgentPost", version: "0.0.17" },
+      clientInfo: { name: "agentpost", title: "AgentPost", version: "1.0.0" },
       capabilities: {
         experimentalApi: true,
         requestAttestation: false,

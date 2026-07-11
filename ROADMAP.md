@@ -1,28 +1,31 @@
 # AgentPost Roadmap
 
-Last reviewed: 2026-07-10
+Last reviewed: 2026-07-11
 
-AgentPost v0 is published with a filesystem core, Claude Code and Codex native
-integrations, and a CLI-neutral Python runtime. This file distinguishes active
-closeout work, planned integrations, optional candidates, and deliberate
-non-goals.
+AgentPost v1.0.0 freezes the trusted-local filesystem core, Claude Code, Codex,
+Antigravity lifecycle, and CLI-neutral Python integration contracts. This file
+distinguishes completed release evidence, planned follow-ups, optional
+candidates, and deliberate non-goals.
 
-## Active closeout
+## V1 release gate
 
-The release gate is tracked in
+The acceptance record is tracked in
 [`docs/FOUNDER_ACCEPTANCE_CHECKLIST.md`](docs/FOUNDER_ACCEPTANCE_CHECKLIST.md).
-It separates founder-observed behavior from agent-owned automation and rollback
-work; neither category may be silently waived.
+Every required founder-observed and agent-owned closeout item is complete:
 
-1. Reload the already-running K/PB/Construct Claude sessions onto the installed
-   AgentPost 0.0.4 plugin generation, then re-run restart catch-up, immediate
-   delivery, and idle deferral. The prior raw watcher and directory-polling
-   processes are stopped; durable legacy folders remain read-only history.
-2. Turn the existing manual wheel and clean-home checks into a repeatable
-   clean-install matrix for Python 3.11-3.13, Claude Code, and Codex.
-3. Prove final rollback behavior: partial install and uninstall must remove
-   only installer-owned integration state while retaining mail, profiles,
-   bindings, and unrelated CLI configuration.
+1. K, PB, and Construct completed fresh-load catch-up, active-turn immediate,
+   and post-turn idle-deferral probes with exact correlated replies. Evidence:
+   founder checklist section 4 and closeout commit `a70b1f1`.
+2. Every GitHub Actions job runs the hermetic bootstrap and preservation check
+   on Python 3.11, 3.12, and 3.13. Evidence: `scripts/verify_clean_install.py`,
+   `.github/workflows/test.yml`, and commit `4fcf6a2`.
+3. Partial install, uninstall, and late binding failures preserve mail,
+   profiles, bindings, and unrelated host configuration. Evidence: founder
+   checklist Agent-owned closeout, the rollback tests added in `4fcf6a2`, the
+   quiescence guard in `a6c20c1`, and launcher cleanup in `c436355`.
+4. Offline delivery, every-first-member cold start, four-agent round robin,
+   managed Codex attention modes, and Antigravity lifecycle catch-up are
+   complete. Evidence: founder checklist sections 2-7 and `d446c48`.
 
 The deployed-architecture and public-documentation council round robin is
 complete: K, PB, and Construct returned 3/3 GREEN with no blocking findings.
@@ -47,16 +50,18 @@ Results:
 3. **Done:** map `PreInvocation` and `Stop` lifecycle hooks to truthful `working` and
    `idle` presence. Use `Stop` continuation only to inject already-unread
    Message-IDs; notification must remain non-claiming.
-4. **Done:** evaluate the documented sidecar/`agentapi` input edge. A valid enabled
-   plugin sidecar did not start on the CLI surface: no process, runtime data, or
-   `SidecarManager` log appeared. Keep already-idle wake unsupported instead of
-   using terminal keystroke injection.
+4. **Done:** evaluate current external-input surfaces. The Antigravity SDK can
+   push turns into SDK-owned sessions; it does not document waking an arbitrary
+   IDE/App-owned idle conversation, and CLI acceptance exposed no validated
+   already-idle wake path. Keep that capability unsupported instead of using
+   terminal keystroke injection.
 5. **Done:** cover install, doctor, uninstall, packaged templates, exact Message-ID
    catch-up, truthful capability degradation, shared-workspace identity
    selection, and multiline reply input.
 6. **Done:** live-test install, static doctor, plugin hook loading, queued delivery,
-   next-prompt exact-ID injection, claim, and correlated reply. Final generalized
-   rollback automation remains part of active closeout.
+   next-prompt exact-ID injection, claim, and correlated reply. Generalized
+   rollback automation completed in `4fcf6a2`, with install quiescence and
+   launcher cleanup completed in `a6c20c1` and `c436355`.
 
 Primary references:
 
@@ -64,7 +69,7 @@ Primary references:
 - [Migrating from Gemini CLI](https://antigravity.google/docs/gcli-migration)
 - [Antigravity plugins](https://antigravity.google/docs/plugins)
 - [Antigravity hooks](https://antigravity.google/docs/hooks)
-- [Antigravity sidecars](https://antigravity.google/docs/sidecars)
+- [Antigravity SDK](https://github.com/google-antigravity/antigravity-sdk-python)
 
 Legacy Gemini extension and ACP concepts in `SPEC.md` are historical design
 evidence, not the current implementation plan. Enterprise-only Gemini CLI
@@ -111,7 +116,7 @@ but it is not scheduled.
 
 These require demonstrated demand before they become milestones.
 
-## Deliberate v0 non-goals
+## Deliberate v1 non-goals
 
 The following are not parked implementation work. Adding any of them changes
 the trusted-local product boundary and requires a new specification:

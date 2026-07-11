@@ -1,0 +1,7 @@
+include CHANGELOG.md
+include IMPLEMENTATION_STATUS.md
+include ROADMAP.md
+include SECURITY.md
+recursive-include docs *.md
+recursive-include integrations *.json *.md
+recursive-include scripts *.py *.sh

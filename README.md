@@ -5,6 +5,10 @@ Claude Code, Codex, Antigravity CLI, and embedded Python agent systems durable
 Markdown mailboxes, agent discovery, direct and group questions, and two
 attention modes without consuming model tokens while waiting.
 
+AgentPost 1.0 is the stable Linux/POSIX release line. Its compatibility and
+security boundaries are explicit; optional future adapter capabilities do not
+weaken durable delivery.
+
 Installed CLI agents treat it as a named communication channel. A human can
 say "send it to PB" or "ask the registered reviewers group"; the integration
 resolves the registered identity or group, resolves the active sender, sends the message,
@@ -15,7 +19,7 @@ as a specialist, or combine those shapes.
 ## Quick Start
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.0.0/scripts/install.sh | sh
 ```
 ### Get two agents talking
 To the first agent: 
@@ -91,7 +95,9 @@ AgentPost needs Python 3.11+. The Codex real-time adapter also needs Node.js 22+
 
 ### Installer behavior
 
-The one-line installer is idempotent. It upgrades the dedicated environment
+The one-line installer is idempotent. The published script and its default
+source are pinned to `v1.0.0`; `AGENTPOST_SOURCE` is the explicit development
+or mirror override. It upgrades the dedicated environment
 under `~/.local/share/agentpost`, preserves `~/.agentpost`, links the command
 into `~/.local/bin`, and migrates unambiguous v1 identity metadata.
 
@@ -109,12 +115,12 @@ and specialist queues.
 
 Antigravity CLI 1.1.1 has a validated lifecycle catch-up profile. Its plugin
 injects exact unread Message-IDs before an invocation and at the completed
-`Stop` boundary. Antigravity's documented sidecar API can wake conversations on
-its IDE/App surfaces, but a valid enabled plugin sidecar does not start under
-Antigravity CLI 1.1.1. AgentPost therefore reports CLI deliveries as queued
-until the next prompt or lifecycle boundary. Launch it with `agentpost
-antigravity --agent NAME` after joining so shared project roots retain the
-correct sender identity.
+`Stop` boundary. Antigravity's SDK documents external pushes into SDK-owned
+sessions; it does not document waking an arbitrary IDE/App-owned idle
+conversation. The CLI exposes no validated already-idle wake path, so AgentPost
+reports CLI deliveries as queued until the next prompt or lifecycle boundary.
+Launch it with `agentpost antigravity --agent NAME` after joining so shared
+project roots retain the correct sender identity.
 
 The natural-language setup above asks each coding agent to perform these
 underlying operations:
@@ -321,6 +327,17 @@ Offline profiles are hidden by `profiles` and `agents-find` unless `--all` or
 `profiles --offline` is requested. Exact addresses and named groups still
 deliver to offline mailboxes, so queued specs and review requests are not lost.
 
+## Security boundary
+
+AgentPost trusts processes running under one operating-system account. Runtime
+mail and configuration are owner-only, and upgrades tighten existing
+AgentPost-owned state through `agentpost migrate`. The filesystem post office
+opens no network listener; the managed Codex transport is loopback-only.
+AgentPost does not provide remote authentication, encryption, hostile-prompt
+filtering, or isolation between same-account agents. See the
+[security policy](SECURITY.md) before using mail that may contain secrets or
+untrusted instructions.
+
 ## Python agent systems
 
 Python orchestrators can embed `AgentRuntime` instead of installing a
@@ -365,6 +382,10 @@ listing, and neither inspection nor notification claims mail automatically.
 - [Python agent quick start](docs/PYTHON_AGENT_QUICKSTART.md)
 - [Python integration](docs/PYTHON.md)
 - [Legacy inbox migration](docs/MIGRATION.md)
+- [Compatibility policy](docs/COMPATIBILITY.md)
+- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+- [Release procedure](docs/RELEASING.md)
 - [Roadmap and parked work](ROADMAP.md)
 - [Detailed design and acceptance criteria](SPEC.md)
 - [Prior-art evaluation](PRIOR_ART_EVALUATION.md)

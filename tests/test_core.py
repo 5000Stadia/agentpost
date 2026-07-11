@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import sys
 import tempfile
 import threading
@@ -64,6 +65,61 @@ class PostOfficeTest(unittest.TestCase):
         for name in ("cx", "k"):
             for directory in ("tmp", "unread", "read", "sent", "adapter"):
                 self.assertTrue((self.root / "agents" / name / directory).is_dir())
+
+    def test_new_runtime_state_is_private_even_with_permissive_umask(self) -> None:
+        root = Path(self.temp.name) / "private-post"
+        original_umask = os.umask(0)
+        try:
+            office = PostOffice(root)
+            office.register_profile(profile("private"))
+            office.register_profile(profile("recipient"))
+            result = office.send("private", "recipient", "owner only")
+        finally:
+            os.umask(original_umask)
+
+        for path in (root, root / "agents", root / "bindings"):
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+        for path in (
+            root / "config.toml",
+            root / "agents" / "private" / "profile.toml",
+            result.recipient_path,
+            result.sent_path,
+        ):
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    def test_migrate_hardens_runtime_without_following_symlinks(self) -> None:
+        delivered = self.office.send("cx", "k", "preserve bytes")
+        external = Path(self.temp.name) / "external"
+        external.write_text("outside", encoding="ascii")
+        external.chmod(0o666)
+        link = self.root / "external-link"
+        link.symlink_to(external)
+
+        durable_paths = (
+            self.root / "config.toml",
+            self.root / "agents" / "cx" / "profile.toml",
+            delivered.recipient_path,
+            delivered.sent_path,
+        )
+        before = {path: path.read_bytes() for path in durable_paths}
+        for directory in (self.root, self.root / "agents", self.root / "agents" / "k"):
+            directory.chmod(0o777)
+        for path in durable_paths:
+            path.chmod(0o666)
+
+        actions = self.office.migrate()
+
+        self.assertIn("runtime permissions: owner-only", actions)
+        self.assertEqual({path: path.read_bytes() for path in durable_paths}, before)
+        for directory, names, files in os.walk(self.root, followlinks=False):
+            current = Path(directory)
+            self.assertEqual(stat.S_IMODE(current.stat().st_mode), 0o700)
+            names[:] = [name for name in names if not (current / name).is_symlink()]
+            for name in files:
+                path = current / name
+                if not path.is_symlink():
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(external.stat().st_mode), 0o666)
 
     def test_profiles_round_trip_and_scan(self) -> None:
         loaded = self.office.load_profile("cx")

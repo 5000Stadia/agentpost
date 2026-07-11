@@ -17,12 +17,16 @@ scheduled. See [the roadmap](../ROADMAP.md) for remaining live-wake work.
 The shortest install or upgrade is one line:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.0.0/scripts/install.sh | sh
 ```
 
 The script creates a dedicated virtual environment under
 `~/.local/share/agentpost`, links `agentpost` into `~/.local/bin`, and runs
-idempotent initialization. It does not delete or replace `~/.agentpost`.
+idempotent initialization. The published script and default package source are
+pinned to `v1.0.0`; set `AGENTPOST_SOURCE` only when deliberately installing a
+development checkout or controlled mirror. Installation does not delete or
+replace `~/.agentpost`, and migration tightens existing AgentPost runtime
+permissions without changing mailbox contents.
 
 Adapter installation commits its project binding only after external plugin
 setup succeeds. If Codex setup fails after staging the AgentPost user hook, the
@@ -51,7 +55,7 @@ The equivalent manual commands are:
 ```sh
 python3 -m venv ~/.local/share/agentpost/venv
 ~/.local/share/agentpost/venv/bin/pip install \
-  git+https://github.com/5000Stadia/agentpost.git
+  git+https://github.com/5000Stadia/agentpost.git@v1.0.0
 mkdir -p ~/.local/bin
 ln -sf ~/.local/share/agentpost/venv/bin/agentpost ~/.local/bin/agentpost
 agentpost init
@@ -304,13 +308,12 @@ project root. The plugin uses `PreInvocation` and `Stop` hooks to inject exact
 unread Message-IDs without claiming them. It supports startup/next-prompt
 catch-up and completed-turn idle delivery.
 
-Antigravity documents plugin sidecars and `agentapi` for its IDE/App surfaces,
-but live CLI 1.1.1 acceptance showed that an installed, enabled, schema-valid
-plugin sidecar does not start: no sidecar process, runtime data, or
-`SidecarManager` initialization appears. `doctor` therefore reports the CLI
-profile as lifecycle catch-up, and senders conservatively see delivery as
-queued. Do not compensate with terminal keystroke injection or a duplicate
-message channel.
+Antigravity's SDK documents external pushes into SDK-owned sessions. Current
+official material does not document waking an arbitrary IDE/App-owned idle
+conversation, and live CLI 1.1.1 acceptance exposed no already-idle wake path.
+`doctor` therefore reports the CLI profile as lifecycle catch-up, and senders
+conservatively see delivery as queued. Do not compensate with terminal
+keystroke injection or a duplicate message channel.
 
 Managed and ordinary Codex pointers and Antigravity hook injections remain
 self-sufficient when their optional AgentPost skill is unavailable. For each

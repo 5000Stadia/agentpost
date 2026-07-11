@@ -37,8 +37,8 @@ after observing its stated result; record Message-IDs for mail-flow evidence.
 
 ## Agent-owned closeout
 
-These are not founder manual tests. Release closeout remains open until the
-agents record them complete in `IMPLEMENTATION_STATUS.md`.
+These are not founder manual tests. All were completed and recorded in
+`IMPLEMENTATION_STATUS.md` before the 1.0 release gate closed.
 
 - [x] Automate the clean-install matrix for available Python 3.11, 3.12, and
   3.13 environments rather than relying only on the completed manual wheel

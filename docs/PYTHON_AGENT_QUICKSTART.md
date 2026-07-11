@@ -10,7 +10,7 @@ AgentPost requires Python 3.11 or newer. Install it, register one durable
 identity, and bind that identity to the project:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.0.0/scripts/install.sh | sh
 
 agentpost profile-register my-agent \
   --display-name 'My Agent' --kind project \

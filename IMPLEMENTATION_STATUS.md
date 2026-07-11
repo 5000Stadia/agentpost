@@ -4,15 +4,17 @@ Last updated: 2026-07-11
 
 ## Current phase
 
-The prior-art gate is complete and selected an independent literal-filesystem
-semantic core. The measured agmsg comparison and live Claude/Codex evaluation
-are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
-`https://github.com/5000Stadia/agentpost`.
+The prior-art gate selected an independent literal-filesystem semantic core.
+The measured agmsg comparison and live Claude/Codex evaluation are in
+`PRIOR_ART_EVALUATION.md`. AgentPost 1.0.0 is the first stable release, with its
+compatibility, security, and release contracts recorded in the repository.
 
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
 `agentpost@agentpost-local` plugin generation 0.0.6; Cx uses Codex plugin
-generation `0.0.4+codex.20260711042958`, and the Python package is at 0.0.17.
+generation `0.0.4+codex.20260711042958`, and the Python package is at 1.0.0.
+Plugin generations identify independently deployed adapter artifacts and do
+not replace the Python package's semantic version.
 Codex hook commands are stable across upgrades; a process that predates the
 user prompt hook must reload before that event becomes live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
@@ -23,6 +25,9 @@ or the original data directories.
 ## Implemented
 
 - Python 3.11+ standard-library package and `agentpost` command.
+- Owner-only runtime directories and durable files independent of umask, plus
+  mailbox-preserving migration of permissive pre-1.0 runtime modes without
+  following symlinks.
 - Atomic profile and group configuration writes.
 - Profile-derived registry with exact selectors, token-overlap discovery,
   visible match reasons, and evidence-backed experience ranking.
@@ -96,6 +101,9 @@ or the original data directories.
 - Tested two-agent getting-started walkthrough and executable smoke test covering
   registration, project binding, display-name delivery, exact claim, reply, and
   correlation without a model call.
+- A documented 1.x compatibility contract, trusted-local security boundary,
+  synchronized release metadata, versioned stable-source installer pin, and
+  repeatable reviewed-SHA release procedure.
 
 ## Verification
 
@@ -107,7 +115,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 151 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 154 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 
@@ -142,13 +150,14 @@ the attention marker is acknowledged. Core/CLI/Claude-watcher/Antigravity tests
 pin sender ownership, no duplicate letter, bare-doctor inference, headless
 failure guidance, and concise offline output.
 
-Live acceptance is being rerun on Claude Code 2.1.206 and Codex CLI 0.144.1.
-Managed Codex has proved restart catch-up, already-idle wake, and active-turn
-immediate steering plus post-turn idle deferral; child-state cleanup remains
-open. Claude K, PB, and C each proved project-local 0.0.5 fresh-load monitor
-startup, already-idle wake before any user prompt, exact-ID claims, and
-correlated replies. K, PB, and C additionally completed active-turn immediate
-and post-turn idle-deferral probes without duplicate processing.
+Live acceptance completed on Claude Code 2.1.206 and Codex CLI 0.144.1.
+Managed Codex proved restart catch-up, already-idle wake, active-turn immediate
+steering, post-turn idle deferral, and child-state cleanup; the latter is pinned
+by `test_codex_launcher_propagates_nondefault_identity_to_every_child` and
+commit `c436355`. Claude K, PB, and C each proved project-local 0.0.5
+fresh-load monitor startup, already-idle wake before any user prompt, exact-ID
+claims, correlated replies, active-turn immediate handling, and post-turn idle
+deferral without duplicate processing.
 The Codex generation slice additionally proved `3/3` current hook discovery,
 token-free trust inspection through `hooks/list`, per-event generation stamps,
 and stable trust across plugin reinstall.
@@ -159,17 +168,15 @@ that delta and independently reran all 112 tests with no new findings. The
 standalone smoke and suite also pass with inherited `AGENTPOST_AGENT` and
 `AGENTPOST_ROOT` deliberately set to unrelated values.
 Antigravity CLI 1.1.1 proved plugin loading, exact next-prompt catch-up, claim,
-and correlated reply. Its documented sidecar shape was also installed and
-enabled experimentally, but the CLI did not initialize `SidecarManager` or
-start the process; the integration therefore retains truthful lifecycle-only
-delivery.
+and correlated reply. The official SDK supports external pushes into SDK-owned
+sessions but does not document arbitrary IDE/App-owned idle-session wake; the
+CLI integration therefore retains truthful lifecycle-only delivery.
 
-## Not yet implemented
+## Non-blocking post-v1 follow-ups
 
-- Antigravity CLI already-idle external wake. The IDE/App sidecar mechanism did
-  not run on CLI 1.1.1; lifecycle catch-up is the accepted CLI behavior.
-- Opt-in live doctor automation and the remaining founder-operated acceptance
-  scenarios.
+- Antigravity CLI already-idle external wake; lifecycle catch-up is the accepted
+  CLI behavior until the host exposes and validates that capability.
+- Opt-in live doctor automation.
 - Generation-truth diagnostics for Claude and Antigravity; the Codex slice is
   implemented and accepted.
 - Durable panel-completion notification and machine-readable adapter

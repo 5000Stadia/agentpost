@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import time
 import tomllib
 import uuid
@@ -23,6 +24,8 @@ MESSAGE_KINDS = {"letter", "question", "answer", "error"}
 NOTIFY_MODES = {"immediate", "idle"}
 MAILBOX_DIRS = ("tmp", "unread", "read", "sent", "adapter")
 CONNECTION_MODES = {"auto", "manual"}
+PRIVATE_DIRECTORY_MODE = 0o700
+PRIVATE_FILE_MODE = 0o600
 
 
 class AgentPostError(Exception):
@@ -230,8 +233,9 @@ class PostOffice:
         return self.root / "bindings"
 
     def initialize(self, connection_mode: str | None = None) -> Path:
-        self.agents_dir.mkdir(parents=True, exist_ok=True)
-        self.bindings_dir.mkdir(parents=True, exist_ok=True)
+        _private_directory(self.root, parents=True)
+        _private_directory(self.agents_dir)
+        _private_directory(self.bindings_dir)
         config = self.root / "config.toml"
         if not config.exists():
             mode = connection_mode or "auto"
@@ -261,6 +265,8 @@ class PostOffice:
         """Upgrade durable metadata without guessing ambiguous workspace defaults."""
         self.initialize()
         actions = []
+        if _harden_runtime_permissions(self.root):
+            actions.append("runtime permissions: owner-only")
         for profile in self.list_profiles():
             if profile.version < 2:
                 self.register_profile(replace(profile, version=2))
@@ -288,9 +294,9 @@ class PostOffice:
         profile.validate()
         self.initialize()
         agent_dir = self._agent_dir(profile.name)
-        agent_dir.mkdir(parents=True, exist_ok=True)
+        _private_directory(agent_dir, parents=True)
         for directory in MAILBOX_DIRS:
-            (agent_dir / directory).mkdir(exist_ok=True)
+            _private_directory(agent_dir / directory)
         self._verify_atomic_mailbox(agent_dir)
         path = agent_dir / "profile.toml"
         _atomic_write(path, _profile_to_toml(profile).encode("utf-8"))
@@ -695,7 +701,7 @@ class PostOffice:
             raise ValueError(f"invalid notify mode: {mode}")
         request_id = uuid.uuid4().hex
         directory = recipient_dir / "adapter" / "notifications"
-        directory.mkdir(parents=True, exist_ok=True)
+        _private_directory(directory, parents=True)
         path = directory / f"{time.time_ns():020d}--{request_id}.json"
         _atomic_write(
             path,
@@ -921,7 +927,12 @@ def _header_line(name: str, value: str) -> str:
 
 
 def _write_new_file(path: Path, data: bytes) -> None:
-    with path.open("xb") as handle:
+    descriptor = os.open(
+        path,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+        PRIVATE_FILE_MODE,
+    )
+    with os.fdopen(descriptor, "wb") as handle:
         handle.write(data)
         handle.flush()
         os.fsync(handle.fileno())
@@ -931,7 +942,9 @@ def _write_new_file(path: Path, data: bytes) -> None:
 def _exclusive_lock(path: Path):
     import fcntl
 
-    with path.open("a+b") as handle:
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR, PRIVATE_FILE_MODE)
+    os.chmod(path, PRIVATE_FILE_MODE)
+    with os.fdopen(descriptor, "a+b") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             yield
@@ -948,6 +961,40 @@ def _atomic_write(path: Path, data: bytes) -> None:
     finally:
         temp.unlink(missing_ok=True)
     _fsync_directory(path.parent)
+
+
+def _private_directory(path: Path, *, parents: bool = False) -> None:
+    path.mkdir(parents=parents, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
+    if path.is_symlink():
+        raise AgentPostError(f"runtime directory must not be a symlink: {path}")
+    os.chmod(path, PRIVATE_DIRECTORY_MODE)
+
+
+def _harden_runtime_permissions(root: Path) -> bool:
+    changed = False
+    for directory, names, files in os.walk(root, topdown=True, followlinks=False):
+        current = Path(directory)
+        names[:] = [name for name in names if not (current / name).is_symlink()]
+        for path, expected in (
+            (current, PRIVATE_DIRECTORY_MODE),
+            *((current / name, PRIVATE_FILE_MODE) for name in files),
+        ):
+            try:
+                metadata = path.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(metadata.st_mode) or not (
+                stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)
+            ):
+                continue
+            if stat.S_IMODE(metadata.st_mode) != expected:
+                try:
+                    os.chmod(path, expected)
+                except FileNotFoundError:
+                    continue
+                else:
+                    changed = True
+    return changed
 
 
 def _fsync_directory(path: Path) -> None:

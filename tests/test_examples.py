@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -27,6 +28,59 @@ from agentpost.installer import _claude_plugin_version  # noqa: E402
 
 
 class DocumentationExampleTest(unittest.TestCase):
+    def test_release_metadata_is_synchronized(self) -> None:
+        with (ROOT / "pyproject.toml").open("rb") as handle:
+            project = tomllib.load(handle)["project"]
+        version = project["version"]
+        tag = f"v{version}"
+
+        self.assertIn(
+            "Development Status :: 5 - Production/Stable",
+            project["classifiers"],
+        )
+        self.assertEqual(project["license"], "MIT")
+        self.assertEqual(project["license-files"], ["LICENSE"])
+        manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+        for required in (
+            "CHANGELOG.md",
+            "SECURITY.md",
+            "recursive-include docs *.md",
+            "recursive-include scripts *.py *.sh",
+        ):
+            self.assertIn(required, manifest)
+        installer = (ROOT / "scripts/install.sh").read_text(encoding="utf-8")
+        self.assertIn(
+            f'git+https://github.com/5000Stadia/agentpost.git@{tag}',
+            installer,
+        )
+        bootstrap = (
+            f"https://raw.githubusercontent.com/5000Stadia/agentpost/"
+            f"{tag}/scripts/install.sh"
+        )
+        for relative in (
+            "README.md",
+            "docs/INSTALL.md",
+            "docs/PYTHON_AGENT_QUICKSTART.md",
+        ):
+            self.assertIn(
+                bootstrap,
+                (ROOT / relative).read_text(encoding="utf-8"),
+            )
+        self.assertIn(
+            f"## [{version}] - 2026-07-11",
+            (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            f'"version": "{version}"',
+            (ROOT / "src/agentpost/installer.py").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            f'version: "{version}"',
+            (ROOT / "src/agentpost/data/codex_bridge.mjs").read_text(
+                encoding="utf-8"
+            ),
+        )
+
     def test_python_quickstart_async_bridge_preserves_claim_boundary(self) -> None:
         document = (ROOT / "docs/PYTHON_AGENT_QUICKSTART.md").read_text(
             encoding="utf-8"
