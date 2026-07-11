@@ -37,16 +37,16 @@ agents record them complete in `IMPLEMENTATION_STATUS.md`.
 
 ## 1. Cx reconnect and generation truth
 
-Current expected precondition: `agentpost doctor cx --project
-/home/k/agentpost --cli codex` passes hook trust but reports all three events
-`unobserved`, because the current remote app server predates the new hooks.
+Completed 2026-07-10. The first founder probe found the integration already
+past the former `unobserved` precondition: all three current-generation events
+had executed.
 
-- [ ] End the old remote Codex process and reconnect Cx from
+- [x] End the old remote Codex process and reconnect Cx from
   `/home/k/agentpost`.
-- [ ] Open `/hooks` and confirm exactly three enabled AgentPost hooks are
-  trusted: `SessionStart`, `UserPromptSubmit`, and `Stop`.
-- [ ] Submit one ordinary prompt and allow the response to complete.
-- [ ] Run:
+- [x] Confirm exactly three enabled AgentPost hooks are trusted:
+  `SessionStart`, `UserPromptSubmit`, and `Stop`.
+- [x] Submit one ordinary prompt and allow the response to complete.
+- [x] Run:
 
   ```sh
   agentpost doctor cx --project /home/k/agentpost --cli codex
@@ -55,7 +55,9 @@ Current expected precondition: `agentpost doctor cx --project
   Pass: every check reports `PASS`, and `codex-generation` says all three hooks
   observed installed generation `0.0.3+codex.20260710221500`.
 
-Evidence/date: ______________________________
+Evidence/date: 2026-07-10 — founder-provided `doctor` output reported every
+check `PASS`, `codex-hook-trust` at `3/3`, and all three hooks observing
+installed generation `0.0.3+codex.20260710221500`.
 
 ## 2. Ordinary Codex next-prompt catch-up
 
