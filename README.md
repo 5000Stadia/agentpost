@@ -73,7 +73,9 @@ new CLI/project binding is established.
 
 For a tested two-agent walkthrough, runtime-specific Claude Code, Codex,
 Antigravity, and Python instructions, see
-[Two-agent quick start](docs/TWO_AGENT_QUICKSTART.md).
+[Two-agent quick start](docs/TWO_AGENT_QUICKSTART.md). Its final section shows
+how to turn registered agents into named teams, departments, review councils,
+and specialist queues.
 
 Antigravity CLI 1.1.1 has a validated lifecycle catch-up profile. Its plugin
 injects exact unread Message-IDs before an invocation and at the completed
@@ -223,7 +225,9 @@ idle.
 
 - Claude Code runs a plugin monitor that polls mailbox metadata and emits a
   native monitor event only when unread mail appears. Lifecycle hooks maintain
-  a short busy/idle boundary.
+  a short busy/idle boundary in the mailbox's AgentPost adapter directory. A
+  fresh Claude load starts the monitor automatically; no model call is made
+  until mail causes a native event.
 - `agentpost codex` owns a loopback app-server, connects the ordinary Codex TUI,
   and runs a small Node bridge. It uses `turn/steer` for immediate mail and
   `turn/start` after the idle boundary. For ordinary Codex launches, plugin
@@ -290,6 +294,12 @@ directly. See
 | Codex ordinary launch | Every prompt boundary | Next prompt | Turn completion | No |
 | Antigravity CLI | Yes | Next lifecycle boundary | Yes | Not yet supported |
 | Embedded Python | Yes | Host scheduler | Host scheduler | Host scheduler |
+
+These runtimes share one delivery and exact-ID contract, but startup evidence
+is adapter-specific. Claude must start a live monitor after a fresh process
+load; managed Codex must attach its app-server bridge; ordinary Codex proves
+lifecycle-hook catch-up only; Antigravity proves hook injection at its first
+`PreInvocation`; and Python delegates turn creation to its host scheduler.
 
 ## Documentation
 

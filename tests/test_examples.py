@@ -14,6 +14,7 @@ ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from agentpost.codex_generation import CODEX_HOOK_GENERATION  # noqa: E402
+from agentpost.installer import _claude_plugin_version  # noqa: E402
 
 
 class DocumentationExampleTest(unittest.TestCase):
@@ -82,6 +83,39 @@ class DocumentationExampleTest(unittest.TestCase):
             },
         )
         self.assertEqual(CODEX_HOOK_GENERATION, manifest["version"])
+
+    def test_claude_plugin_generation_matches_doctor_and_package(self) -> None:
+        claude_root = ROOT / "integrations" / "claude"
+        marketplace = json.loads(
+            (claude_root / ".claude-plugin" / "marketplace.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        manifest = json.loads(
+            (
+                claude_root
+                / "agentpost"
+                / ".claude-plugin"
+                / "plugin.json"
+            ).read_text(encoding="utf-8")
+        )
+        packaged = json.loads(
+            (ROOT / "src" / "agentpost" / "data" / "integrations.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        packaged_manifest = json.loads(
+            packaged["claude/agentpost/.claude-plugin/plugin.json"]
+        )
+        self.assertEqual(
+            {
+                marketplace["metadata"]["version"],
+                marketplace["plugins"][0]["version"],
+                manifest["version"],
+                packaged_manifest["version"],
+            },
+            {_claude_plugin_version()},
+        )
 
     def test_bootstrap_installer_is_valid_posix_shell(self) -> None:
         subprocess.run(

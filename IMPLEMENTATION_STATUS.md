@@ -11,8 +11,8 @@ are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
 
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
-`agentpost@agentpost-local` plugin at 0.0.4 installed; Cx runs Codex plugin
-generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.10.
+`agentpost@agentpost-local` plugin at 0.0.5 installed; Cx runs Codex plugin
+generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.11.
 Codex hook commands are stable across upgrades; a process that predates the
 user prompt hook must reload before that event becomes live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
@@ -89,7 +89,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 108 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 112 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 
@@ -97,23 +97,35 @@ The final deployed-architecture council panel completed 3/3: K, PB, and
 Construct all returned GREEN with no blocking findings. PB's reply-urgency and
 presence-freshness polish was folded into 0.0.8.
 
-The 0.0.10 wheel was built and installed into a clean temporary virtual
+The 0.0.11 wheel was built and installed into a clean temporary virtual
 environment and home. Its Claude, Codex, and Antigravity integrations all
 materialized without the source checkout, and the installed CLI passed the
-executable two-agent smoke. The packaged Codex bridge accepts the launcher's
-kebab-case ownership arguments and fails a malformed startup visibly.
+executable two-agent smoke. The packaged Claude integration is generation
+0.0.5. Its monitor no longer depends on `CLAUDE_PLUGIN_DATA`, which Claude Code
+2.1.206 does not export to monitor processes, and doctor now requires the
+current enabled entry for the exact project being diagnosed. The expected
+generation is derived from the packaged manifest, and an unbound monitor exits
+quietly instead of crash-looping after missing runtime state. The packaged
+Codex bridge accepts the launcher's kebab-case ownership arguments and fails a
+malformed startup visibly.
 
-Live acceptance passed on Claude Code 2.1.206 and Codex CLI 0.144.1. Claude
-proved restart catch-up, already-idle wake, and busy-turn idle deferral. Codex
-proved restart catch-up, active-turn immediate steering, a distinct post-turn
-idle notification, bridge/fallback-hook exclusion, and child-state cleanup.
+Live acceptance is being rerun on Claude Code 2.1.206 and Codex CLI 0.144.1.
+Managed Codex has proved restart catch-up, already-idle wake, and active-turn
+immediate steering plus post-turn idle deferral; child-state cleanup remains
+open. Claude K, PB, and C each proved project-local 0.0.5 fresh-load monitor
+startup, already-idle wake before any user prompt, exact-ID claims, and
+correlated replies. K and PB additionally completed active-turn immediate and
+post-turn idle-deferral probes. C completed active-turn immediate delivery; its
+idle probe remains correctly deferred while C's real work turn is still active.
 The Codex generation slice additionally proved `3/3` current hook discovery,
 token-free trust inspection through `hooks/list`, per-event generation stamps,
 and stable trust across plugin reinstall.
-Kernos returned final implementation GREEN after independently reviewing the
-diff and rerunning the suite. Its test-hermeticity finding was fixed; all 106
-tests and the standalone smoke now also pass with inherited `AGENTPOST_AGENT`
-and `AGENTPOST_ROOT` deliberately set to unrelated values.
+Kernos independently returned GREEN on the complete diff and reran 111 tests.
+Its two non-blocking notes were then implemented: packaged-manifest version
+derivation and graceful unbound-monitor exit. Kernos returned focused GREEN on
+that delta and independently reran all 112 tests with no new findings. The
+standalone smoke and suite also pass with inherited `AGENTPOST_AGENT` and
+`AGENTPOST_ROOT` deliberately set to unrelated values.
 Antigravity CLI 1.1.1 proved plugin loading, exact next-prompt catch-up, claim,
 and correlated reply. Its documented sidecar shape was also installed and
 enabled experimentally, but the CLI did not initialize `SidecarManager` or

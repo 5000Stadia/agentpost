@@ -272,3 +272,94 @@ The two-agent setup is working when:
 3. Agent Two claims the exact request Message-ID.
 4. Agent One receives a reply carrying the correct `In-Reply-To` value.
 5. No duplicate request was placed in a legacy inbox.
+
+## 8. Add groups and departments
+
+An AgentPost group is a durable named address list. A department uses the same
+mechanism; choose a name that communicates why its members receive mail. Group
+membership is independent of CLI type, project roots, and whether each member
+is currently online.
+
+### Create a standing department
+
+Create an engineering department containing both agents:
+
+```sh
+agentpost group-set engineering 'agent-one,agent-two'
+```
+
+`group-set` writes the complete membership list. To add a third registered
+agent, repeat it with all intended members:
+
+```sh
+agentpost group-set engineering 'agent-one,agent-two,release-reviewer'
+```
+
+The command rejects unknown mailbox names rather than creating or guessing an
+identity.
+
+### Inspect the directory
+
+```sh
+agentpost groups
+agentpost identities
+```
+
+Example group output:
+
+```text
+engineering  agent-one,agent-two,release-reviewer
+```
+
+`identities` includes the same address as `@engineering` alongside individual
+agent nameplates.
+
+### Send to the department
+
+Natural chat instruction:
+
+> Send the implementation schedule to the engineering group through
+> AgentPost.
+
+Portable CLI equivalent:
+
+```sh
+agentpost message engineering \
+  'The implementation schedule is ready. Review the milestones you own.'
+```
+
+The bare group name and explicit `@engineering` form are equivalent. AgentPost
+expands the group to concrete recipients at send time, gives every copy one
+shared Message-ID and audience, and durably queues copies for offline members.
+
+### Ask a review council
+
+Groups also work as independently attributed review panels:
+
+```sh
+agentpost group-set release-council \
+  'agent-one,agent-two,release-reviewer,security-reviewer'
+
+agentpost question release-council \
+  'Is release candidate 3 ready to ship? Reply GREEN or RED with one reason.' \
+  --notify idle
+```
+
+Each member claims and replies to its own copy. Replies retain the shared
+question's `In-Reply-To`, allowing `agentpost panel` to derive quorum and
+individual positions without a coordinator agent.
+
+### Useful group shapes
+
+| Name | Use |
+| --- | --- |
+| `engineering` | A standing department that receives implementation and operational updates. |
+| `world-team` | A project team spanning domain, data-model, and application owners. |
+| `release-council` | A cross-functional approval panel for explicit go/no-go questions. |
+| `security-reviewers` | A specialist review queue for threat models and sensitive changes. |
+| `on-call` | The current small set responsible for time-sensitive operational questions. |
+
+Use a named group when membership should be explicit and inspectable. Use a
+selector such as `@role:code-review`, `@project:construct`, or
+`@specialty:temporal-identity` when recipients should instead be resolved from
+current profile metadata. Neither form requires every recipient to be online.

@@ -8,18 +8,21 @@ after observing its stated result; record Message-IDs for mail-flow evidence.
 
 ## Automated evidence already complete
 
-- [x] AgentPost 0.0.10 includes the managed Codex bridge startup correction;
+- [x] AgentPost 0.0.11 includes the managed Codex bridge startup correction
+  and the Claude monitor startup correction;
   the earlier 0.0.9 generation-truth release is recorded at `69fa7db`.
-- [x] The full Python suite passes: 108 tests.
+- [x] The full Python suite passes: 112 tests.
 - [x] The suite also passes with unrelated `AGENTPOST_AGENT` and
   `AGENTPOST_ROOT` values inherited from another connected shell.
-- [x] A clean wheel install materializes the Claude, Codex, and Antigravity
-  integrations and passes the executable two-agent smoke.
+- [x] A clean 0.0.11 wheel install materializes Claude plugin 0.0.5 plus the
+  Codex and Antigravity integrations and passes the executable two-agent smoke.
 - [x] Codex reports all three stable AgentPost hooks trusted; reinstalling the
   same dispatchers preserves `3/3` trust.
 - [x] Isolated Codex acceptance observed current `SessionStart`,
   `UserPromptSubmit`, and `Stop` generation markers without claiming mail.
-- [x] Kernos independently returned implementation GREEN.
+- [x] Kernos independently returned full-diff GREEN, then focused GREEN after
+  both review notes were implemented; its final independent run passed all 112
+  tests.
 - [x] Automated cold-start coverage queues mail with zero consumers, rotates
   K, PB, C, and Cx through every first-member position, permits all four
   mailbox-local leases concurrently, and verifies non-claiming catch-up.
@@ -87,6 +90,25 @@ was empty afterward.
 
 ## 3. Managed Codex attention modes
 
+### CLI-neutral contract and adapter-specific evidence
+
+Every adapter test must preserve the same durable semantics: delivery succeeds
+while closed, native notification names exact IDs without claiming them,
+`immediate` interrupts only at that adapter's documented safe boundary, `idle`
+waits for completion, one consumer claims each letter once, replies correlate,
+and shutdown releases mailbox ownership. Waiting and notification checks are
+token-free; a legitimately started or steered model turn has normal model usage.
+
+Fresh-load evidence differs by runtime:
+
+| Runtime | Required fresh-load observation |
+| --- | --- |
+| Claude Code | Project-local current plugin starts a monitor, becomes `ARMED`, and emits queued exact IDs before any user prompt. |
+| Managed Codex | Launcher starts its bridge, becomes `ARMED`, and uses `turn/start` or `turn/steer` for the documented attention mode. |
+| Ordinary Codex | Current lifecycle hooks inject queued IDs at startup or the next prompt; already-idle wake is not claimed. |
+| Antigravity | Current plugin injects queued IDs at the first `PreInvocation`; already-idle wake is not claimed. |
+| Embedded Python | Runtime starts its watcher; its host scheduler supplies the turn boundary and wake policy. |
+
 Launch from `/home/k/agentpost`:
 
 ```sh
@@ -99,10 +121,10 @@ Bridge startup evidence: 2026-07-10 — after the 0.0.10 fresh-install fix,
 
 - [x] **Idle mail while idle:** send one `--notify idle` question. Pass: one
   new turn starts after the idle boundary and processes the exact Message-ID.
-- [ ] **Immediate mail during a turn:** while Cx is visibly working, send one
+- [x] **Immediate mail during a turn:** while Cx is visibly working, send one
   `--notify immediate` question. Pass: it steers the active turn once; no
   duplicate follow-up turn starts for the same letter.
-- [ ] **Idle mail during a turn:** while Cx is working, send one `--notify idle`
+- [x] **Idle mail during a turn:** while Cx is working, send one `--notify idle`
   question. Pass: it does not interrupt; one turn starts after completion.
 - [ ] Exit the launcher. Pass: child processes and the live bridge marker are
   removed, and `agentpost armed cx` returns `QUEUED` rather than claiming a
@@ -112,7 +134,13 @@ Message-IDs/results: 2026-07-10 — idle question
 `<fbd7f61c-496c-47b3-a8aa-488d23a0d3c4@agentpost.local>` automatically
 started a turn without a user prompt; Cx claimed that exact Message-ID and sent
 correlated answer `<3c753249-984d-4859-a02c-10d53ca800fb@agentpost.local>`.
-Immediate steering and active-turn idle deferral remain pending.
+Immediate question `<e8316bcb-039e-4e78-aa48-6a351c1c1cdd@agentpost.local>`
+produced exactly one bridge `steered` event on the existing turn and correlated
+answer `<0be9931c-9363-4417-b4c5-7ece80f3a86e@agentpost.local>`. Idle-deferral
+question `<8b2c3e39-6417-4681-97e3-8ad161958937@agentpost.local>` was delivered
+during that active turn, produced one `deferred-idle` bridge event, and then
+appeared in one post-completion `turn-start-request`; correlated answer
+`<03c7aa78-1f6c-4c5a-b3b8-d1327053ca20@agentpost.local>` completed the test.
 
 ## 4. Claude agents K, PB, and Construct
 
@@ -124,19 +152,78 @@ agentpost doctor pb --project /home/k/pattern-buffer --cli claude
 agentpost doctor c  --project /home/k/Newproject     --cli claude
 ```
 
-- [ ] All three doctors pass identity, mailbox, project, and plugin checks.
-- [ ] Each agent receives one exact-ID restart catch-up letter.
+- [x] All three doctors pass identity, mailbox, project, and current 0.0.5
+  project-local plugin checks.
+- [x] Each agent receives one exact-ID restart catch-up letter.
 - [ ] Each agent receives one immediate letter while working without losing
   its current task.
 - [ ] Each agent defers one idle letter until its current turn completes.
 - [ ] No test letter is processed twice, and every response correlates to the
   original Message-ID.
 
-K evidence: __________________________________
+Queued fresh-load IDs:
 
-PB evidence: _________________________________
+- K: `<5f2c3184-c281-4409-819d-8131e6c16ddc@agentpost.local>`
+- PB: `<d2a83dbd-8c9d-49ea-858e-3e53f94b7831@agentpost.local>`
+- C: `<ff9969e6-a693-47a3-b02c-29f053cf46ec@agentpost.local>`
 
-C evidence: __________________________________
+K evidence: fresh plugin 0.0.5 monitor became `ARMED` as pid 153120, started a
+turn before any user prompt, and surfaced the exact notification set including
+probe `<5f2c3184-c281-4409-819d-8131e6c16ddc@agentpost.local>`. K claimed only
+the listed IDs and returned correlated answer
+`<52bf00b1-317e-4bf0-bc00-55db41903960@agentpost.local>`. Active-window probe
+`<4b566aa5-41eb-481b-89d5-df7395ad74f3@agentpost.local>` held a 15-second turn;
+immediate probe `<fe83c197-7d6b-4ab7-b6bd-4a8590e4a1a7@agentpost.local>` was
+answered in that same turn by
+`<f33940f7-07ad-4330-9062-af80dfb0dd92@agentpost.local>`, while idle probe
+`<87bc0904-bafb-493d-9de3-8c1c80cb255d@agentpost.local>` waited for a fresh
+follow-up turn and answer
+`<e854581a-5d19-4abe-b27e-822cff82545b@agentpost.local>`.
+
+PB evidence: the original queued probe was consumed by the explicitly
+deprecated interim shell watcher in PB's old long-lived session, not by the
+native plugin. PB reported that distinction in correlated answer
+`<84173a3b-167f-414a-8e67-2f05f0edb00c@agentpost.local>`. The shell watcher was
+restarted once by that old session and intercepted the first successor as well;
+both are invalidated fixture evidence. After the old session exited, fresh
+plugin 0.0.5 monitor pid 155352 became `ARMED` and idle. It woke before any user
+prompt for final probe
+`<2cf946ee-f66e-42ff-9f9c-5ed8b7f44cfc@agentpost.local>`, claimed that exact ID
+once, and sent correlated answer
+`<8950ac72-ad0a-4d35-b4f6-3ea9a63b3d72@agentpost.local>`. Active-window probe
+`<9a256182-ffc5-4ed4-8705-7c67a52136a9@agentpost.local>` held a 15-second turn;
+immediate probe `<aa18d741-a4ff-4e11-b3a4-921f9446e9e6@agentpost.local>` was
+answered during it by
+`<e2b2317e-c804-4b22-9886-d5cc3df7058a@agentpost.local>`, while idle probe
+`<cc490d7b-35ae-4392-98aa-21b5be996e23@agentpost.local>` waited until completion
+and answer `<626071b5-e0fd-4b25-99de-225366fd352d@agentpost.local>`.
+
+C evidence: fresh plugin 0.0.5 native monitor woke before any user prompt and
+surfaced an exact notification set containing probe
+`<ff9969e6-a693-47a3-b02c-29f053cf46ec@agentpost.local>`. C processed that set
+first and sent correlated answer
+`<74bb7358-152b-4644-b117-e76e77f58b60@agentpost.local>`. Immediate probe
+`<b959c4cb-93aa-4090-985b-892b2441b84d@agentpost.local>` entered C's existing
+real-work turn and produced correlated answer
+`<b52244bc-b114-482a-98c1-d5c9f7fdab43@agentpost.local>`. Idle probe
+`<824d6a3e-d608-4bef-84bc-8b49492ad72c@agentpost.local>` remains correctly
+deferred while that turn is still working.
+
+## 4A. Antigravity adapter
+
+- [x] Fresh install/doctor passes CLI 1.1.1 and plugin checks.
+- [x] A queued letter is injected at the first fresh-load `PreInvocation`
+  without claiming it in the hook.
+- [x] The Antigravity agent claims the exact ID once and sends a correlated
+  reply.
+- [x] Already-idle external wake remains explicitly unsupported rather than
+  being reported as armed.
+
+Evidence: question `<9e6419e7-0478-48ac-94ee-d0c8c3a3d05a@agentpost.local>`
+was injected at `PreInvocation`; correlated answer
+`<822b7040-31bc-4e11-a6a2-d9bab819f061@agentpost.local>` confirmed that
+boundary. The later CLI quota message did not invalidate the completed,
+durably correlated lifecycle exchange.
 
 ## 5. Durable offline delivery
 

@@ -25,10 +25,23 @@ def claude_boundary(state: str, delay: float = 0.0) -> int:
         raise ValueError(f"invalid Claude boundary state: {state}")
     if delay < 0:
         raise ValueError("boundary delay must not be negative")
-    data_dir = Path(os.environ["CLAUDE_PLUGIN_DATA"])
-    data_dir.mkdir(parents=True, exist_ok=True)
-    destination = data_dir / "boundary.json"
-    descriptor, temporary = tempfile.mkstemp(dir=data_dir, prefix=".boundary-")
+    office = PostOffice(_runtime_root())
+    try:
+        profile = identify_agent(
+            office,
+            Path.cwd(),
+            cli="claude",
+            agent=os.environ.get("AGENTPOST_AGENT"),
+        )
+    except (AgentPostError, OSError, ValueError):
+        print("{}")
+        return 0
+    destination = _claude_boundary_marker(office, profile.name)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        dir=destination.parent,
+        prefix=f".{destination.name}-",
+    )
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump({"state": state, "not_before": time.time() + delay}, handle)
@@ -43,12 +56,15 @@ def claude_boundary(state: str, delay: float = 0.0) -> int:
 
 def claude_monitor() -> int:
     office = PostOffice(_runtime_root())
-    profile = identify_agent(
-        office,
-        Path.cwd(),
-        cli="claude",
-        agent=os.environ.get("AGENTPOST_AGENT"),
-    )
+    try:
+        profile = identify_agent(
+            office,
+            Path.cwd(),
+            cli="claude",
+            agent=os.environ.get("AGENTPOST_AGENT"),
+        )
+    except (AgentPostError, OSError, ValueError):
+        return 0
     watcher = MailboxWatcher(office, profile.name, interval=0.2)
     lease = ConsumerLease(office, profile.name, "claude")
     marker = (
@@ -67,7 +83,7 @@ def claude_monitor() -> int:
                     time.sleep(watcher.interval)
                     continue
             now = time.time()
-            state = _claude_boundary_state()
+            state = _claude_boundary_state(office, profile.name)
             if now - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
                 _atomic_json(
                     marker,
@@ -491,8 +507,12 @@ def _runtime_root() -> Path:
     return Path(os.environ.get("AGENTPOST_ROOT", "~/.agentpost")).expanduser()
 
 
-def _claude_boundary_state() -> str:
-    path = Path(os.environ["CLAUDE_PLUGIN_DATA"]) / "boundary.json"
+def _claude_boundary_marker(office: PostOffice, agent: str) -> Path:
+    return office.root / "agents" / agent / "adapter" / "claude-boundary.json"
+
+
+def _claude_boundary_state(office: PostOffice, agent: str) -> str:
+    path = _claude_boundary_marker(office, agent)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         value = data.get("state")

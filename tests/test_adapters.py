@@ -38,6 +38,8 @@ from agentpost.codex_generation import (  # noqa: E402
 )
 from agentpost.installer import (  # noqa: E402
     CODEX_USER_HOOK_COMMAND,
+    _claude_plugin_version,
+    _doctor_claude,
     _install_codex_user_hook,
     _integration_source,
     _remove_codex_user_hook,
@@ -229,13 +231,113 @@ lease.release()
         )
 
     def test_claude_delayed_idle_remains_busy_until_grace_period(self) -> None:
-        data_dir = Path(self.temp.name) / "claude-data"
-        with patch.dict("os.environ", {"CLAUDE_PLUGIN_DATA": str(data_dir)}):
+        office = self.office()
+        with patch.dict(
+            "os.environ",
+            {"AGENTPOST_ROOT": str(self.root), "AGENTPOST_AGENT": "k"},
+            clear=False,
+        ):
             with redirect_stdout(StringIO()):
                 claude_boundary("idle", delay=0.05)
-            self.assertEqual(_claude_boundary_state(), "busy")
+            self.assertEqual(_claude_boundary_state(office, "k"), "busy")
             time.sleep(0.07)
-            self.assertEqual(_claude_boundary_state(), "idle")
+            self.assertEqual(_claude_boundary_state(office, "k"), "idle")
+
+    def test_claude_monitor_starts_without_plugin_data(self) -> None:
+        office = self.office()
+        source = Path(__file__).parents[1] / "src"
+        environment = {
+            **os.environ,
+            "AGENTPOST_ROOT": str(self.root),
+            "AGENTPOST_AGENT": "k",
+            "PYTHONPATH": str(source),
+        }
+        environment.pop("CLAUDE_PLUGIN_DATA", None)
+        process = subprocess.Popen(
+            [sys.executable, "-m", "agentpost", "internal-claude-monitor"],
+            cwd=Path(self.temp.name),
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        marker = None
+        deadline = time.monotonic() + 3
+        try:
+            while time.monotonic() < deadline:
+                matches = tuple(
+                    (self.root / "agents" / "k" / "adapter").glob(
+                        "claude-monitor-*.json"
+                    )
+                )
+                if matches:
+                    marker = matches[0]
+                    break
+                if process.poll() is not None:
+                    break
+                time.sleep(0.05)
+            self.assertIsNone(process.poll())
+            self.assertIsNotNone(marker)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=3)
+
+    def test_unbound_claude_monitor_exits_cleanly(self) -> None:
+        self.office()
+        source = Path(__file__).parents[1] / "src"
+        environment = {
+            **os.environ,
+            "AGENTPOST_ROOT": str(self.root),
+            "PYTHONPATH": str(source),
+        }
+        environment.pop("AGENTPOST_AGENT", None)
+        environment.pop("CLAUDE_PLUGIN_DATA", None)
+        result = subprocess.run(
+            [sys.executable, "-m", "agentpost", "internal-claude-monitor"],
+            cwd=Path(self.temp.name),
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=3,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_claude_doctor_requires_current_enabled_project_entry(self) -> None:
+        project = Path(self.temp.name) / "current"
+        project.mkdir()
+        plugin_list = [
+            {
+                "id": "agentpost@agentpost-local",
+                "version": "0.0.5",
+                "enabled": True,
+                "projectPath": str(Path(self.temp.name) / "other"),
+            },
+            {
+                "id": "agentpost@agentpost-local",
+                "version": "0.0.4",
+                "enabled": True,
+                "projectPath": str(project),
+            },
+        ]
+        completed = subprocess.CompletedProcess(
+            args=["claude", "plugin", "list", "--json"],
+            returncode=0,
+            stdout=json.dumps(plugin_list),
+            stderr="",
+        )
+        with patch("agentpost.installer.subprocess.run", return_value=completed):
+            stale = _doctor_claude(project)[0]
+        self.assertFalse(stale.ok)
+        self.assertIn("stale version 0.0.4", stale.detail)
+
+        plugin_list[1]["version"] = "0.0.5"
+        completed.stdout = json.dumps(plugin_list)
+        with patch("agentpost.installer.subprocess.run", return_value=completed):
+            current = _doctor_claude(project)[0]
+        self.assertTrue(current.ok)
+        self.assertEqual(_claude_plugin_version(), "0.0.5")
 
     def test_codex_snapshot_is_machine_readable_and_non_claiming(self) -> None:
         office = self.office()

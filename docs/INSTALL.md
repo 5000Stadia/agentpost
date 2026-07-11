@@ -177,8 +177,17 @@ agentpost doctor docs --project /work/docs --cli claude
 
 Restart Claude Code after installation. During local development, Claude copies
 the marketplace plugin into its cache, so source changes need a plugin update or
-reinstall and another restart. Static doctor must report `PASS` for identity,
-mailbox, and `claude-plugin`.
+reinstall and another restart. Static doctor requires the enabled project-local
+plugin at the current AgentPost Claude generation and must report `PASS` for
+identity, mailbox, and `claude-plugin`.
+
+On a fresh load, the plugin starts its mailbox monitor automatically. Verify it
+without sending a user prompt: queue one exact-ID letter while the project is
+closed, launch through `agentpost claude --agent AGENT`, and confirm
+`agentpost armed AGENT` reports the live Claude monitor before the native event
+processes that letter. Polling, heartbeat, and boundary tracking are token-free;
+the model uses its normal account/session behavior only after the event starts
+a turn.
 
 `install` records the project binding before installing the native integration.
 

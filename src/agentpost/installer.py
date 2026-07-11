@@ -239,6 +239,7 @@ def _resolve_adapter_cli(
 
 def _doctor_claude(project: Path) -> tuple[Check, ...]:
     try:
+        expected_version = _claude_plugin_version()
         result = subprocess.run(
             ["claude", "plugin", "list", "--json"],
             cwd=project,
@@ -247,12 +248,65 @@ def _doctor_claude(project: Path) -> tuple[Check, ...]:
             capture_output=True,
         )
         plugins = json.loads(result.stdout)
-        matches = [item for item in plugins if item.get("id") == "agentpost@agentpost-local"]
-        enabled = any(item.get("enabled") for item in matches)
-        detail = matches[0].get("installPath", "installed") if matches else "not installed"
-        return (Check("claude-plugin", enabled, detail),)
-    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        matches = [
+            item
+            for item in plugins
+            if item.get("id") == "agentpost@agentpost-local"
+            and item.get("projectPath")
+            and Path(item["projectPath"]).resolve() == project
+        ]
+        current = next(
+            (
+                item
+                for item in matches
+                if item.get("enabled") is True
+                and item.get("version") == expected_version
+            ),
+            None,
+        )
+        if current is not None:
+            detail = current.get("installPath", f"version {expected_version}")
+            return (Check("claude-plugin", True, detail),)
+        if not matches:
+            detail = "not installed for this project"
+        elif not any(item.get("enabled") is True for item in matches):
+            detail = "installed but disabled for this project"
+        else:
+            versions = ", ".join(
+                sorted({str(item.get("version", "unknown")) for item in matches})
+            )
+            detail = (
+                f"stale version {versions}; expected {expected_version}; "
+                "run agentpost install claude and restart Claude Code"
+            )
+        return (Check("claude-plugin", False, detail),)
+    except (
+        AgentPostError,
+        OSError,
+        subprocess.CalledProcessError,
+        json.JSONDecodeError,
+    ) as exc:
         return (Check("claude-plugin", False, str(exc)),)
+
+
+def _claude_plugin_version() -> str:
+    try:
+        bundle = json.loads(
+            files("agentpost").joinpath("data/integrations.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        manifest = json.loads(
+            bundle["claude/agentpost/.claude-plugin/plugin.json"]
+        )
+        version = manifest["version"]
+    except (KeyError, OSError, TypeError, json.JSONDecodeError) as exc:
+        raise AgentPostError(
+            "packaged Claude integration version is unavailable"
+        ) from exc
+    if not isinstance(version, str) or not version:
+        raise AgentPostError("packaged Claude integration version is invalid")
+    return version
 
 
 def _doctor_codex(
@@ -314,7 +368,7 @@ def _list_codex_hooks(project: Path, timeout: float = 5.0) -> list[dict]:
                     "clientInfo": {
                         "name": "agentpost-doctor",
                         "title": "AgentPost Doctor",
-                        "version": "0.0.10",
+                        "version": "0.0.11",
                     },
                     "capabilities": {
                         "experimentalApi": True,
