@@ -345,9 +345,21 @@ class PostOffice:
         token = hashlib.sha256(f"{cli}\0{current}".encode("utf-8")).hexdigest()
         path = self.bindings_dir / f"{token}.toml"
         binding = Binding(agent=name, cli=cli, project=str(current))
-        _atomic_write(path, _binding_to_toml(binding).encode("utf-8"))
-        if current.is_dir():
-            self._record_workspace_identity(name, current)
+        marker = current / ".agentpost.toml"
+        exclude = _git_exclude_path(current)
+        snapshots = tuple(
+            (target, target.read_bytes() if target.exists() else None)
+            for target in (path, marker, exclude)
+            if target is not None
+        )
+        try:
+            _atomic_write(path, _binding_to_toml(binding).encode("utf-8"))
+            if current.is_dir():
+                self._record_workspace_identity(name, current)
+        except Exception:
+            for target, contents in reversed(snapshots):
+                _restore_file(target, contents)
+            raise
         return path
 
     def list_bindings(self) -> tuple[Binding, ...]:
@@ -1031,18 +1043,9 @@ def _workspace_to_toml(default_agent: str, known_agents: Iterable[str]) -> str:
 
 
 def _exclude_workspace_marker(project: Path) -> None:
-    git = project / ".git"
-    if git.is_file():
-        try:
-            value = git.read_text(encoding="utf-8").strip()
-        except OSError:
-            return
-        if not value.startswith("gitdir:"):
-            return
-        git = (project / value.removeprefix("gitdir:").strip()).resolve()
-    if not git.is_dir():
+    exclude = _git_exclude_path(project)
+    if exclude is None:
         return
-    exclude = git / "info" / "exclude"
     try:
         existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
         lines = existing.splitlines()
@@ -1056,3 +1059,25 @@ def _exclude_workspace_marker(project: Path) -> None:
     except OSError:
         # Identity binding remains valid when Git metadata is read-only.
         return
+
+
+def _git_exclude_path(project: Path) -> Path | None:
+    git = project / ".git"
+    if git.is_file():
+        try:
+            value = git.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if not value.startswith("gitdir:"):
+            return None
+        git = (project / value.removeprefix("gitdir:").strip()).resolve()
+    if not git.is_dir():
+        return None
+    return git / "info" / "exclude"
+
+
+def _restore_file(path: Path, contents: bytes | None) -> None:
+    if contents is None:
+        path.unlink(missing_ok=True)
+        return
+    _atomic_write(path, contents)

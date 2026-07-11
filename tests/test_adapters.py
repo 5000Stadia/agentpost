@@ -7,6 +7,7 @@ import unittest
 import json
 import os
 import subprocess
+import tomllib
 from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch
@@ -49,6 +50,7 @@ from agentpost.installer import (  # noqa: E402
     armed,
     doctor,
     install,
+    uninstall,
 )
 from agentpost.presence import agent_presence  # noqa: E402
 from agentpost.ownership import ConsumerLease  # noqa: E402
@@ -751,6 +753,180 @@ lease.release()
         binding = office.list_bindings()[0]
         self.assertEqual((binding.agent, binding.cli), ("cx", "codex"))
         self.assertEqual(binding.project, str(project.resolve()))
+
+    def test_failed_install_restores_hooks_and_preserves_all_runtime_state(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "partial-install-project"
+        project.mkdir()
+        home = Path(self.temp.name) / "home"
+        hooks_path = home / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True)
+        original_hooks = (
+            '{\n  "description": "unrelated config",\n  "hooks": '
+            '{"Stop": [{"hooks": [{"command": "keep stop"}]}]}\n}\n'
+        ).encode("utf-8")
+        hooks_path.write_bytes(original_hooks)
+        office.set_group("durable-team", ("cx", "k"))
+        unread = office.send("k", "cx", "preserve unread")
+        claimed = office.send("cx", "k", "preserve read")
+        office.claim("k", claimed.message_id)
+
+        def tree() -> dict[str, bytes]:
+            return {
+                str(path.relative_to(self.root)): path.read_bytes()
+                for path in self.root.rglob("*")
+                if path.is_file()
+            }
+
+        before = tree()
+        attempts = 0
+
+        def fail_after_staging(*_args, **_kwargs) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 3:
+                raise AgentPostError("simulated plugin add failure")
+
+        with patch("agentpost.installer._integration_source", return_value=project):
+            with patch("agentpost.installer.Path.home", return_value=home):
+                with patch("agentpost.installer._run", side_effect=fail_after_staging):
+                    with self.assertRaisesRegex(AgentPostError, "simulated"):
+                        install(office, "codex", "cx", project)
+
+        self.assertEqual(attempts, 3)
+        self.assertEqual(tree(), before)
+        self.assertEqual(hooks_path.read_bytes(), original_hooks)
+        self.assertEqual(office.list_bindings(), ())
+        self.assertFalse((project / ".agentpost.toml").exists())
+        self.assertTrue(unread.recipient_path.exists())
+        self.assertTrue((self.root / "agents" / "k" / "read").is_dir())
+
+    def test_late_binding_failure_rolls_back_binding_marker_hook_and_runtime(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "late-binding-project"
+        exclude = project / ".git" / "info" / "exclude"
+        exclude.parent.mkdir(parents=True)
+        exclude.write_text("keep-pattern\n", encoding="ascii")
+        marker = project / ".agentpost.toml"
+        marker.write_text('default_agent = "unterminated\n', encoding="utf-8")
+        home = Path(self.temp.name) / "home"
+        hooks_path = home / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True)
+        original_hooks = b'{"hooks":{"Stop":[{"hooks":[{"command":"keep"}]}]}}\n'
+        hooks_path.write_bytes(original_hooks)
+        office.set_group("durable-team", ("cx", "k"))
+        office.send("k", "cx", "preserve unread")
+        claimed = office.send("cx", "k", "preserve read")
+        office.claim("k", claimed.message_id)
+
+        def tree(root: Path) -> dict[str, bytes]:
+            return {
+                str(path.relative_to(root)): path.read_bytes()
+                for path in root.rglob("*")
+                if path.is_file()
+            }
+
+        runtime_before = tree(self.root)
+        project_before = tree(project)
+        with patch("agentpost.installer._integration_source", return_value=project):
+            with patch("agentpost.installer.Path.home", return_value=home):
+                with patch("agentpost.installer._run"):
+                    with self.assertRaises(tomllib.TOMLDecodeError):
+                        install(office, "codex", "cx", project)
+
+        self.assertEqual(tree(self.root), runtime_before)
+        self.assertEqual(tree(project), project_before)
+        self.assertEqual(hooks_path.read_bytes(), original_hooks)
+        self.assertEqual(office.list_bindings(), ())
+
+    def test_codex_install_output_failure_keeps_committed_state_consistent(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "output-failure-project"
+        project.mkdir()
+        home = Path(self.temp.name) / "home"
+        with patch("agentpost.installer._integration_source", return_value=project):
+            with patch("agentpost.installer.Path.home", return_value=home):
+                with patch("agentpost.installer._run"):
+                    with patch("builtins.print", side_effect=BrokenPipeError("closed")):
+                        install(office, "codex", "cx", project)
+
+        bindings = office.list_bindings()
+        self.assertEqual(len(bindings), 1)
+        self.assertEqual((bindings[0].agent, bindings[0].cli), ("cx", "codex"))
+        self.assertTrue((project / ".agentpost.toml").exists())
+        hooks = json.loads((home / ".codex" / "hooks.json").read_text())
+        handlers = [
+            handler
+            for group in hooks["hooks"]["UserPromptSubmit"]
+            for handler in group["hooks"]
+        ]
+        self.assertIn(CODEX_USER_HOOK_COMMAND, {item["command"] for item in handlers})
+
+    def test_uninstall_removes_only_owned_adapter_state(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "uninstall-project"
+        project.mkdir()
+        home = Path(self.temp.name) / "home"
+        hooks_path = home / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True)
+        unrelated = {"type": "command", "command": "keep prompt"}
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "description": "keep config",
+                    "hooks": {
+                        "UserPromptSubmit": [{"hooks": [unrelated]}],
+                        "Stop": [{"hooks": [{"command": "keep stop"}]}],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        _install_codex_user_hook(home)
+        office.set_group("durable-team", ("cx", "k"))
+        office.send("k", "cx", "preserve unread")
+        claimed = office.send("cx", "k", "preserve read")
+        office.claim("k", claimed.message_id)
+        for cli in ("codex", "claude", "antigravity"):
+            office.bind_agent("cx", cli, project)
+
+        def tree() -> dict[str, bytes]:
+            return {
+                str(path.relative_to(self.root)): path.read_bytes()
+                for path in self.root.rglob("*")
+                if path.is_file()
+            }
+
+        before = tree()
+        marker = (project / ".agentpost.toml").read_bytes()
+        with patch("agentpost.installer.Path.home", return_value=home):
+            with patch("agentpost.installer._run") as run:
+                uninstall("codex", project)
+                uninstall("claude", project)
+                uninstall("antigravity", project)
+
+        self.assertEqual(tree(), before)
+        self.assertEqual((project / ".agentpost.toml").read_bytes(), marker)
+        retained = json.loads(hooks_path.read_text(encoding="utf-8"))
+        self.assertEqual(retained["description"], "keep config")
+        self.assertEqual(retained["hooks"]["UserPromptSubmit"], [{"hooks": [unrelated]}])
+        self.assertIn("Stop", retained["hooks"])
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [
+                ["codex", "plugin", "remove", "agentpost@agentpost-local"],
+                [
+                    "claude",
+                    "plugin",
+                    "uninstall",
+                    "agentpost@agentpost-local",
+                    "--scope",
+                    "local",
+                    "--keep-data",
+                ],
+                ["agy", "plugin", "uninstall", "agentpost"],
+            ],
+        )
 
     def test_codex_install_re_registers_hooks_on_every_generation(self) -> None:
         office = self.office()

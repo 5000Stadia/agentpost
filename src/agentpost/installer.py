@@ -36,91 +36,101 @@ CODEX_USER_HOOK = {
 def install(office: PostOffice, cli: str, agent: str, project: Path) -> None:
     project = project.expanduser().resolve()
     profile = identify_agent(office, project, cli=cli, agent=agent)
-    office.bind_agent(profile.name, cli, project)
     source = _integration_source(cli)
-    if cli == "claude":
-        _run(
-            ["claude", "plugin", "marketplace", "add", str(source), "--scope", "user"],
-            cwd=project,
-            allow_already=True,
-        )
-        _run(
-            ["claude", "plugin", "marketplace", "update", "agentpost-local"],
-            cwd=project,
-        )
-        _run(
-            [
-                "claude",
-                "plugin",
-                "install",
-                "agentpost@agentpost-local",
-                "--scope",
-                "local",
-            ],
-            cwd=project,
-            allow_already=True,
-        )
-        _run(
-            [
-                "claude",
-                "plugin",
-                "update",
-                "agentpost@agentpost-local",
-                "--scope",
-                "local",
-            ],
-            cwd=project,
-        )
-        _run(
-            [
-                "claude",
-                "plugin",
-                "enable",
-                "agentpost@agentpost-local",
-                "--scope",
-                "local",
-            ],
-            cwd=project,
-            allow_already=True,
-        )
-    elif cli == "codex":
-        _install_codex_user_hook()
-        _run(
-            ["codex", "plugin", "marketplace", "add", str(source)],
-            cwd=project,
-            allow_already=True,
-        )
-        _run(
-            ["codex", "plugin", "remove", CODEX_PLUGIN_ID],
-            cwd=project,
-            allow_missing=True,
-        )
-        _run(
-            ["codex", "plugin", "add", CODEX_PLUGIN_ID],
-            cwd=project,
-        )
-        print(
-            "AgentPost refreshed the Codex plugin and user prompt hook. On first "
-            "install, open `/hooks` and trust all three stable AgentPost hooks. "
-            "Reload a process that predates the prompt hook, then complete one "
-            "prompt to verify the active generation."
-        )
-    elif cli == "antigravity":
-        _run(
-            ["agy", "plugin", "validate", str(source)],
-            cwd=project,
-        )
-        _run(
-            ["agy", "plugin", "uninstall", "agentpost"],
-            cwd=project,
-            allow_missing=True,
-        )
-        _run(
-            ["agy", "plugin", "install", str(source)],
-            cwd=project,
-        )
-    else:
-        raise AgentPostError(f"unsupported installer: {cli}")
+    hook_snapshot = _snapshot_file(_codex_user_hooks_path()) if cli == "codex" else None
+    try:
+        if cli == "claude":
+            _run(
+                ["claude", "plugin", "marketplace", "add", str(source), "--scope", "user"],
+                cwd=project,
+                allow_already=True,
+            )
+            _run(
+                ["claude", "plugin", "marketplace", "update", "agentpost-local"],
+                cwd=project,
+            )
+            _run(
+                [
+                    "claude",
+                    "plugin",
+                    "install",
+                    "agentpost@agentpost-local",
+                    "--scope",
+                    "local",
+                ],
+                cwd=project,
+                allow_already=True,
+            )
+            _run(
+                [
+                    "claude",
+                    "plugin",
+                    "update",
+                    "agentpost@agentpost-local",
+                    "--scope",
+                    "local",
+                ],
+                cwd=project,
+            )
+            _run(
+                [
+                    "claude",
+                    "plugin",
+                    "enable",
+                    "agentpost@agentpost-local",
+                    "--scope",
+                    "local",
+                ],
+                cwd=project,
+                allow_already=True,
+            )
+        elif cli == "codex":
+            _install_codex_user_hook()
+            _run(
+                ["codex", "plugin", "marketplace", "add", str(source)],
+                cwd=project,
+                allow_already=True,
+            )
+            _run(
+                ["codex", "plugin", "remove", CODEX_PLUGIN_ID],
+                cwd=project,
+                allow_missing=True,
+            )
+            _run(
+                ["codex", "plugin", "add", CODEX_PLUGIN_ID],
+                cwd=project,
+            )
+        elif cli == "antigravity":
+            _run(
+                ["agy", "plugin", "validate", str(source)],
+                cwd=project,
+            )
+            _run(
+                ["agy", "plugin", "uninstall", "agentpost"],
+                cwd=project,
+                allow_missing=True,
+            )
+            _run(
+                ["agy", "plugin", "install", str(source)],
+                cwd=project,
+            )
+        else:
+            raise AgentPostError(f"unsupported installer: {cli}")
+        office.bind_agent(profile.name, cli, project)
+    except Exception:
+        if hook_snapshot is not None:
+            _restore_file(hook_snapshot)
+        raise
+    if cli == "codex":
+        try:
+            print(
+                "AgentPost refreshed the Codex plugin and user prompt hook. On first "
+                "install, open `/hooks` and trust all three stable AgentPost hooks. "
+                "Reload a process that predates the prompt hook, then complete one "
+                "prompt to verify the active generation."
+            )
+        except BrokenPipeError:
+            pass
 
 
 def uninstall(cli: str, project: Path) -> None:
@@ -368,7 +378,7 @@ def _list_codex_hooks(project: Path, timeout: float = 5.0) -> list[dict]:
                     "clientInfo": {
                         "name": "agentpost-doctor",
                         "title": "AgentPost Doctor",
-                        "version": "0.0.13",
+                        "version": "0.0.14",
                     },
                     "capabilities": {
                         "experimentalApi": True,
@@ -568,6 +578,27 @@ def _atomic_json_file(path: Path, data: dict) -> None:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2)
             handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def _snapshot_file(path: Path) -> tuple[Path, bytes | None]:
+    return path, path.read_bytes() if path.exists() else None
+
+
+def _restore_file(snapshot: tuple[Path, bytes | None]) -> None:
+    path, contents = snapshot
+    if contents is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}-")
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(contents)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)

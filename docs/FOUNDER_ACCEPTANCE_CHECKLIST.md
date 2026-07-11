@@ -40,12 +40,23 @@ after observing its stated result; record Message-IDs for mail-flow evidence.
 These are not founder manual tests. Release closeout remains open until the
 agents record them complete in `IMPLEMENTATION_STATUS.md`.
 
-- [ ] Automate the clean-install matrix for available Python 3.11, 3.12, and
+- [x] Automate the clean-install matrix for available Python 3.11, 3.12, and
   3.13 environments rather than relying only on the completed manual wheel
-  check.
-- [ ] Prove partial-install and uninstall rollback: remove only AgentPost-owned
+  check. Evidence: every GitHub Actions matrix job runs
+  `scripts/verify_clean_install.py` through the selected interpreter. The
+  verifier installs through `scripts/install.sh` into a temporary home, checks
+  interpreter and package versions, validates the minimal runtime and symlink,
+  then seeds profiles, groups, bindings, unread/read/sent mail, config, and
+  workspace identity before byte-comparing both trees across reinstall.
+- [x] Prove partial-install and uninstall rollback: remove only AgentPost-owned
   integration state while preserving unrelated hooks/configuration, profiles,
-  bindings, unread mail, read history, and sent history.
+  bindings, unread mail, read history, and sent history. Evidence:
+  `test_failed_install_restores_hooks_and_preserves_all_runtime_state` injects
+  a late Codex plugin failure;
+  `test_late_binding_failure_rolls_back_binding_marker_hook_and_runtime` uses a
+  malformed marker after external setup; and
+  `test_uninstall_removes_only_owned_adapter_state` snapshots the complete
+  runtime while uninstalling Codex, Claude, and Antigravity registrations.
 - [x] Reload the long-lived K, PB, and Construct Claude sessions onto the
   current plugin, then record restart catch-up, immediate delivery, and idle
   deferral for each.

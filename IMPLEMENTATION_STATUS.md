@@ -12,7 +12,7 @@ are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
 `agentpost@agentpost-local` plugin at 0.0.5 installed; Cx runs Codex plugin
-generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.13.
+generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.14.
 Codex hook commands are stable across upgrades; a process that predates the
 user prompt hook must reload before that event becomes live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
@@ -54,6 +54,11 @@ or the original data directories.
   explicit approval, reinstall, and reload recovery.
 - Claude/Codex install, deterministic doctor, and mailbox-preserving uninstall
   commands.
+- Transactional adapter binding: failed setup records no false workspace
+  connection, and failed Codex setup restores the original user-hook document.
+- Hermetic clean-bootstrap verification runs through the real installer in the
+  Python 3.11, 3.12, and 3.13 CI matrix; idempotent reinstall preserves runtime
+  state.
 - Antigravity CLI 1.1.1 plugin, install/doctor/uninstall path, non-claiming
   PreInvocation catch-up, and Stop-boundary delivery with honest degraded
   already-idle wake reporting.
@@ -158,8 +163,8 @@ delivery.
 
 - Antigravity CLI already-idle external wake. The IDE/App sidecar mechanism did
   not run on CLI 1.1.1; lifecycle catch-up is the accepted CLI behavior.
-- Opt-in live doctor automation, final rollback acceptance, and an automated
-  clean-install matrix.
+- Opt-in live doctor automation and the remaining founder-operated acceptance
+  scenarios.
 - Generation-truth diagnostics for Claude and Antigravity; the Codex slice is
   implemented and accepted.
 - Durable panel-completion notification and machine-readable adapter

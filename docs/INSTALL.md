@@ -24,6 +24,11 @@ The script creates a dedicated virtual environment under
 `~/.local/share/agentpost`, links `agentpost` into `~/.local/bin`, and runs
 idempotent initialization. It does not delete or replace `~/.agentpost`.
 
+Adapter installation commits its project binding only after external plugin
+setup succeeds. If Codex setup fails after staging the AgentPost user hook, the
+original hook document is restored byte-for-byte and no new binding or
+workspace marker is recorded.
+
 The equivalent manual commands are:
 
 ```sh
