@@ -61,19 +61,25 @@ installed generation `0.0.3+codex.20260710221500`.
 
 ## 2. Ordinary Codex next-prompt catch-up
 
-- [ ] Leave a freshly reconnected ordinary Codex session idle, without the
+- [x] Leave a freshly reconnected ordinary Codex session idle, without the
   managed `agentpost codex` launcher.
-- [ ] From K, PB, or Construct, send one uniquely worded AgentPost question to
+- [x] From K, PB, or Construct, send one uniquely worded AgentPost question to
   Cx and retain its Message-ID.
-- [ ] Confirm delivery alone does not start a model turn while Cx is idle.
-- [ ] Submit an unrelated user prompt in Cx.
-- [ ] Confirm the exact unread Message-ID is surfaced before that requested
+- [x] Confirm delivery alone does not start a model turn while Cx is idle.
+- [x] Submit a user prompt in Cx after delivery.
+- [x] Confirm the exact unread Message-ID is surfaced before that requested
   turn, then claim only that letter, answer it by `In-Reply-To`, and provide a
   short synopsis in the user chat.
-- [ ] Confirm the letter remains unread until the explicit claim; the hook
+- [x] Confirm the letter remains unread until the explicit claim; the hook
   itself must not move it.
 
-Message-ID/result: __________________________
+Message-ID/result: 2026-07-10 — question
+`<df69caa1-4120-4d66-affe-2d8018be7fa2@agentpost.local>` queued without a
+turn. `UserPromptSubmit` generation `0.0.3+codex.20260710221500` then executed;
+two pre-claim listings around a side-effect-free `read` both showed the letter
+unread. Cx explicitly claimed it and sent correlated answer
+`<3d682f96-4272-43c5-b1b3-8d3ceb4cc7ac@agentpost.local>`. The Cx unread tray
+was empty afterward.
 
 ## 3. Managed Codex attention modes
 
