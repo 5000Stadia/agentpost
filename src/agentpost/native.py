@@ -149,6 +149,7 @@ def codex_hook(event_name: str, generation: str | None = None) -> int:
             print("{}")
             return 0
         unread = office.list_messages(profile.name, "unread")
+        requests = office.notification_requests(profile.name)
         if not unread:
             print("{}")
             return 0
@@ -163,6 +164,7 @@ def codex_hook(event_name: str, generation: str | None = None) -> int:
             "session-start": "SessionStart",
             "user-prompt-submit": "UserPromptSubmit",
         }
+        surfaced = False
         if event_name in hook_event_names:
             print(
                 json.dumps(
@@ -174,10 +176,17 @@ def codex_hook(event_name: str, generation: str | None = None) -> int:
                     }
                 )
             )
+            surfaced = True
         elif not event.get("stop_hook_active", False):
             print(json.dumps({"decision": "block", "reason": instruction}))
+            surfaced = True
         else:
             print("{}")
+        if surfaced:
+            unread_ids = {record.letter.message_id for record in unread}
+            for request in requests:
+                if request.message_id in unread_ids:
+                    office.acknowledge_notification(profile.name, request.request_id)
         return 0
     finally:
         lease.release()
@@ -185,17 +194,36 @@ def codex_hook(event_name: str, generation: str | None = None) -> int:
 
 def codex_snapshot(office: PostOffice, agent: str) -> int:
     records = office.list_messages(agent, "unread")
+    requests = office.notification_requests(agent)
     print(
         json.dumps(
             [
                 {
                     "message_id": record.letter.message_id,
                     "notify": record.letter.notify,
+                    "delivery_id": f"mail:{record.letter.message_id}",
                 }
                 for record in records
             ]
+            + [
+                {
+                    "message_id": request.message_id,
+                    "notify": request.notify,
+                    "delivery_id": f"notification:{request.request_id}",
+                    "request_id": request.request_id,
+                }
+                for request in requests
+            ]
         )
     )
+    return 0
+
+
+def acknowledge_notifications(
+    office: PostOffice, agent: str, request_ids: list[str]
+) -> int:
+    for request_id in request_ids:
+        office.acknowledge_notification(agent, request_id)
     return 0
 
 
@@ -242,20 +270,31 @@ def antigravity_hook(event_name: str) -> int:
             return 0
 
         unread = office.list_messages(profile.name, "unread")
+        requests = office.notification_requests(profile.name)
+        forced = {request.message_id for request in requests}
         ledger_path = _antigravity_ledger(office, profile.name, event)
         notified = _antigravity_notified(ledger_path)
-        pending = [record for record in unread if record.letter.message_id not in notified]
+        pending = [
+            record
+            for record in unread
+            if record.letter.message_id not in notified
+            or record.letter.message_id in forced
+        ]
         if not pending:
             print(_antigravity_empty_output(event_name))
             return 0
 
-        notified.update(record.letter.message_id for record in pending)
-        _atomic_json(ledger_path, {"notified": sorted(notified)})
         instruction = _antigravity_instruction(profile.name, pending)
         if event_name == "pre-invocation":
             print(json.dumps({"injectSteps": [{"ephemeralMessage": instruction}]}))
         else:
             print(json.dumps({"decision": "continue", "reason": instruction}))
+        notified.update(record.letter.message_id for record in pending)
+        _atomic_json(ledger_path, {"notified": sorted(notified)})
+        pending_ids = {record.letter.message_id for record in pending}
+        for request in requests:
+            if request.message_id in pending_ids:
+                office.acknowledge_notification(profile.name, request.request_id)
         return 0
     finally:
         if not inherited:
@@ -275,6 +314,13 @@ def codex_launch(
         cli="codex",
         agent=agent or os.environ.get("AGENTPOST_AGENT"),
     )
+    if not sys.stdin.isatty():
+        raise AgentPostError(
+            "managed Codex launch requires an interactive terminal; run "
+            "`agentpost codex --agent NAME` from a terminal. There is no headless "
+            "live-wake bridge; headless services should embed agentpost.AgentRuntime, "
+            "while ordinary Codex lifecycle hooks provide next-boundary catch-up"
+        )
     lease = ConsumerLease(office, profile.name, "codex", cwd=cwd)
     lease.require()
     marker = _codex_bridge_marker(office, profile.name)

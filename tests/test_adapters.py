@@ -71,7 +71,11 @@ class AdapterTest(unittest.TestCase):
         self.root = Path(self.temp.name) / "post"
         self.agentpost_environment = {
             name: os.environ.pop(name, None)
-            for name in ("AGENTPOST_AGENT", "AGENTPOST_ROOT")
+            for name in (
+                "AGENTPOST_AGENT",
+                "AGENTPOST_CODEX_BRIDGE",
+                "AGENTPOST_ROOT",
+            )
         }
 
     def tearDown(self) -> None:
@@ -229,7 +233,6 @@ lease.release()
             [first.message_id],
         )
         self.assertEqual(watcher.pending(), ())
-        self.assertEqual(len(office.list_messages("k", "unread")), 1)
 
         second = office.send("cx", "k", "second")
         self.assertEqual(
@@ -242,6 +245,20 @@ lease.release()
             [record.letter.message_id for record in restarted.pending()],
             [first.message_id, second.message_id],
         )
+
+    def test_watcher_resurfaces_an_explicit_notification_request_once(self) -> None:
+        office = self.office()
+        sent = office.send("cx", "k", "Please revisit this.")
+        watcher = MailboxWatcher(office, "k")
+        self.assertEqual([r.letter.message_id for r in watcher.pending()], [sent.message_id])
+        self.assertEqual(watcher.pending(), ())
+        office.request_notification("cx", "k", sent.message_id, notify="immediate")
+        resurfaced = watcher.pending()
+        self.assertEqual([r.letter.message_id for r in resurfaced], [sent.message_id])
+        self.assertEqual(resurfaced[0].letter.notify, "immediate")
+        self.assertEqual(watcher.pending(), ())
+        self.assertEqual(office.notification_requests("k"), ())
+        self.assertEqual(len(office.list_messages("k", "unread")), 1)
 
     def test_idle_waits_for_completion_while_immediate_surfaces(self) -> None:
         bell = BoundaryBell()
@@ -379,9 +396,27 @@ lease.release()
             codex_snapshot(office, "k")
         self.assertEqual(
             json.loads(output.getvalue()),
-            [{"message_id": sent.message_id, "notify": "idle"}],
+            [
+                {
+                    "message_id": sent.message_id,
+                    "notify": "idle",
+                    "delivery_id": f"mail:{sent.message_id}",
+                }
+            ],
         )
         self.assertEqual(len(office.list_messages("k", "unread")), 1)
+
+    def test_codex_snapshot_exposes_re_notify_as_a_distinct_delivery(self) -> None:
+        office = self.office()
+        sent = office.send("cx", "k", "Re-notify me.")
+        request = office.request_notification("cx", "k", sent.message_id)
+        output = StringIO()
+        with redirect_stdout(output):
+            codex_snapshot(office, "k")
+        items = json.loads(output.getvalue())
+        self.assertEqual([item["message_id"] for item in items], [sent.message_id] * 2)
+        self.assertEqual(items[1]["delivery_id"], f"notification:{request.request_id}")
+        self.assertEqual(items[1]["request_id"], request.request_id)
 
     def test_codex_remote_command_places_remote_after_subcommand(self) -> None:
         self.assertEqual(
@@ -432,7 +467,8 @@ lease.release()
         with patch("agentpost.native._free_loopback_port", return_value=4321), \
                 patch("agentpost.native._wait_for_app_server"), \
                 patch("agentpost.native.subprocess.Popen", side_effect=[server, bridge]) as popen, \
-                patch("agentpost.native.subprocess.call", return_value=0) as call:
+                patch("agentpost.native.subprocess.call", return_value=0) as call, \
+                patch("sys.stdin.isatty", return_value=True):
             self.assertEqual(codex_launch(office, project, [], agent="cr"), 0)
 
         child_environments = [
@@ -443,6 +479,18 @@ lease.release()
         for environment in child_environments:
             self.assertEqual(environment["AGENTPOST_AGENT"], "cr")
             self.assertEqual(environment["AGENTPOST_CODEX_BRIDGE"], "1")
+
+    def test_codex_launcher_explains_interactive_only_requirement(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "headless-project"
+        project.mkdir()
+        with patch("sys.stdin.isatty", return_value=False):
+            with self.assertRaisesRegex(
+                AgentPostError,
+                "requires an interactive terminal.*no headless live-wake bridge",
+            ):
+                codex_launch(office, project, [], agent="cx")
+        self.assertFalse((office.root / "agents/cx/adapter/consumer.json").exists())
 
     def test_codex_fallback_hook_is_suppressed_by_live_bridge_marker(self) -> None:
         office = self.office()
@@ -875,6 +923,15 @@ lease.release()
                 antigravity_hook("pre-invocation")
         self.assertEqual(json.loads(output.getvalue()), {"injectSteps": []})
 
+        office.request_notification("cx", "ag", first.message_id)
+        output = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+            with patch("sys.stdin", StringIO(json.dumps(event))), redirect_stdout(output):
+                antigravity_hook("pre-invocation")
+        reinjected = json.loads(output.getvalue())
+        self.assertIn(first.message_id, reinjected["injectSteps"][0]["ephemeralMessage"])
+        self.assertEqual(office.notification_requests("ag"), ())
+
         second = office.send("cx", "ag", "second")
         stop_event = {**event, "fullyIdle": True}
         output = StringIO()
@@ -888,6 +945,45 @@ lease.release()
         self.assertEqual(len(office.list_messages("ag", "unread")), 2)
         self.assertEqual(agent_presence(office, "ag").state, "idle")
         self.assertFalse(armed(office, "ag")[0])
+
+    def test_antigravity_output_failure_keeps_attention_retryable(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "antigravity-retry-project"
+        project.mkdir()
+        office.register_profile(
+            Profile(
+                name="ag",
+                display_name="Antigravity",
+                cli="antigravity",
+                kind="project",
+                summary="Antigravity retry test",
+                projects=("antigravity-retry",),
+                project_roots=(str(project),),
+            )
+        )
+        sent = office.send("cx", "ag", "retry after broken output")
+        request = office.request_notification("cx", "ag", sent.message_id)
+        event = {
+            "conversationId": "conversation-output-failure",
+            "workspacePaths": [str(project)],
+        }
+
+        with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+            with patch("sys.stdin", StringIO(json.dumps(event))):
+                with patch("builtins.print", side_effect=BrokenPipeError("closed")):
+                    with self.assertRaises(BrokenPipeError):
+                        antigravity_hook("pre-invocation")
+
+        self.assertTrue(request.path.exists())
+        adapter = self.root / "agents" / "ag" / "adapter"
+        self.assertEqual(tuple(adapter.glob("antigravity-*.json")), ())
+
+        output = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+            with patch("sys.stdin", StringIO(json.dumps(event))), redirect_stdout(output):
+                self.assertEqual(antigravity_hook("pre-invocation"), 0)
+        self.assertIn(sent.message_id, output.getvalue())
+        self.assertFalse(request.path.exists())
 
     def test_antigravity_install_validates_plugin_and_records_binding(self) -> None:
         office = self.office()

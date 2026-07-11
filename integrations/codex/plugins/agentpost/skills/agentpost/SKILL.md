@@ -178,6 +178,17 @@ Replies to questions default to immediate notification because an answer is
 awaited; replies to ordinary letters default to idle. Use `--notify` to
 override either case.
 
+If an existing unread letter needs a fresh native notification, the ORIGINAL
+sender may re-notify that exact durable Message-ID without creating a duplicate:
+
+```sh
+agentpost notify RECIPIENT MESSAGE_ID --mode immediate
+```
+
+Re-notification never changes, claims, or copies the letter. Do not send a new
+control envelope merely to point at old unread mail. Fresh adapter startup
+catch-up names the full queued unread set in one notification turn.
+
 Named groups, comma-separated recipients, and selectors such as
 `@role:marketing`, `@project:construct`, and `@specialty:temporal-identity` are
 resolved to concrete recipients before delivery.

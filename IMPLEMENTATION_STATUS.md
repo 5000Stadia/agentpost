@@ -12,7 +12,7 @@ are in `PRIOR_ART_EVALUATION.md`. The initial public release is available at
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
 `agentpost@agentpost-local` plugin at 0.0.5 installed; Cx runs Codex plugin
-generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.12.
+generation `0.0.3+codex.20260710221500`, and the Python package is at 0.0.13.
 Codex hook commands are stable across upgrades; a process that predates the
 user prompt hook must reload before that event becomes live. The prior
 Claude-to-Codex companion plugin, SQLite agentpost-eval prototype, global
@@ -44,6 +44,10 @@ or the original data directories.
   mailbox bridge, remote client, and tool subprocesses, plus ancestry-aware
   diagnostics that identify an accidental nested launcher as the current
   session's own parent bridge.
+- Full-set managed Codex startup catch-up, durable sender-owned re-notification
+  of an existing unread Message-ID across native adapters, inferred bare
+  `doctor`, explicit interactive-only launcher diagnostics, and concise queued
+  delivery receipts.
 - Token-free Codex `SessionStart`/`UserPromptSubmit`/`Stop` catch-up, exact
   executed-generation markers that never imply presence, `3/3` hook-trust
   verification, stale/unobserved/ambiguous generation diagnostics, and
@@ -93,7 +97,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 116 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 125 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 
@@ -119,6 +123,14 @@ explicit non-default role on a workspace whose default differs, invokes
 the tool subprocess observes the explicit role. Mocked boundary coverage also
 requires the same resolved environment on app-server, bridge, and remote client;
 nested-launch lease tests pin both the parent-bridge and unrelated-owner wording.
+
+The 0.0.13 bridge regression uses a token-free fake app-server transport to
+prove that three pre-existing unread letters are named together in the first
+managed turn. It then requests fresh attention for one already-known unread ID,
+observes a live `turn/steer` carrying that original ID, and verifies that only
+the attention marker is acknowledged. Core/CLI/Claude-watcher/Antigravity tests
+pin sender ownership, no duplicate letter, bare-doctor inference, headless
+failure guidance, and concise offline output.
 
 Live acceptance is being rerun on Claude Code 2.1.206 and Codex CLI 0.144.1.
 Managed Codex has proved restart catch-up, already-idle wake, and active-turn

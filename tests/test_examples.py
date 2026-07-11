@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import os
+import base64
+import hashlib
 import json
 import select
 import shlex
 import shutil
+import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -21,6 +25,235 @@ from agentpost.installer import _claude_plugin_version  # noqa: E402
 
 
 class DocumentationExampleTest(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_codex_bridge_batches_all_startup_unread_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "post"
+            project = base / "shared-project"
+            project.mkdir()
+            office = PostOffice(root)
+            for name in ("c", "cr"):
+                office.register_profile(
+                    Profile(
+                        name=name,
+                        display_name=name.upper(),
+                        cli="codex",
+                        kind="role",
+                        summary=f"Role {name}",
+                        roles=("review",),
+                        project_roots=(str(project),),
+                    )
+                )
+            message_ids = [
+                office.send("c", "cr", f"queued-{index}").message_id
+                for index in range(3)
+            ]
+            startup_attention = office.request_notification(
+                "c", "cr", message_ids[0], notify="immediate"
+            )
+
+            bin_dir = base / "bin"
+            bin_dir.mkdir()
+            agentpost = bin_dir / "agentpost"
+            agentpost.write_text(
+                "#!/bin/sh\nexec "
+                + shlex.quote(sys.executable)
+                + " -c 'from agentpost.cli import main; raise SystemExit(main())' \"$@\"\n",
+                encoding="ascii",
+            )
+            agentpost.chmod(0o755)
+            environment = os.environ.copy()
+            environment["AGENTPOST_ROOT"] = str(root)
+            environment["AGENTPOST_AGENT"] = "cr"
+            environment["PYTHONPATH"] = str(ROOT / "src")
+            environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
+
+            listener = socket.socket()
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            listener.settimeout(5)
+            port = listener.getsockname()[1]
+            bridge = ROOT / "src/agentpost/data/codex_bridge.mjs"
+            process = subprocess.Popen(
+                [
+                    "node",
+                    str(bridge),
+                    "--url",
+                    f"ws://127.0.0.1:{port}",
+                    "--agent",
+                    "cr",
+                    "--root",
+                    str(root),
+                    "--cwd",
+                    str(project),
+                    "--log",
+                    str(base / "bridge.log"),
+                    "--presence",
+                    str(base / "presence.json"),
+                    "--owner-pid",
+                    str(os.getpid()),
+                    "--instance-id",
+                    "startup-batch-test",
+                ],
+                cwd=project,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            connection = None
+            try:
+                connection, _ = listener.accept()
+                connection.settimeout(5)
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    request += connection.recv(4096)
+                headers = request.decode("ascii").split("\r\n")
+                key = next(
+                    line.split(":", 1)[1].strip()
+                    for line in headers
+                    if line.lower().startswith("sec-websocket-key:")
+                )
+                accept = base64.b64encode(
+                    hashlib.sha1(
+                        (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")
+                    ).digest()
+                ).decode("ascii")
+                connection.sendall(
+                    (
+                        "HTTP/1.1 101 Switching Protocols\r\n"
+                        "Upgrade: websocket\r\n"
+                        "Connection: Upgrade\r\n"
+                        f"Sec-WebSocket-Accept: {accept}\r\n\r\n"
+                    ).encode("ascii")
+                )
+
+                def receive_exact(size: int) -> bytes:
+                    data = b""
+                    while len(data) < size:
+                        data += connection.recv(size - len(data))
+                    return data
+
+                def receive_json() -> dict:
+                    first, second = receive_exact(2)
+                    length = second & 0x7F
+                    if length == 126:
+                        length = struct.unpack("!H", receive_exact(2))[0]
+                    elif length == 127:
+                        length = struct.unpack("!Q", receive_exact(8))[0]
+                    mask = receive_exact(4) if second & 0x80 else b""
+                    payload = receive_exact(length)
+                    if mask:
+                        payload = bytes(value ^ mask[i % 4] for i, value in enumerate(payload))
+                    self.assertEqual(first & 0x0F, 1)
+                    return json.loads(payload)
+
+                def send_json(value: dict) -> None:
+                    payload = json.dumps(value).encode("utf-8")
+                    if len(payload) < 126:
+                        header = bytes((0x81, len(payload)))
+                    else:
+                        header = bytes((0x81, 126)) + struct.pack("!H", len(payload))
+                    connection.sendall(header + payload)
+
+                turn = None
+                deadline = time.monotonic() + 10
+                while turn is None and time.monotonic() < deadline:
+                    message = receive_json()
+                    if message.get("method") == "initialize":
+                        send_json({"id": message["id"], "result": {}})
+                    elif message.get("method") == "thread/loaded/list":
+                        send_json({"id": message["id"], "result": {"data": ["thread-1"]}})
+                    elif message.get("method") == "turn/start":
+                        turn = message
+                        send_json({"id": message["id"], "result": {"turn": {"id": "turn-1"}}})
+                self.assertIsNotNone(turn)
+                instruction = turn["params"]["input"][0]["text"]
+                for message_id in message_ids:
+                    self.assertEqual(instruction.count(message_id), 1)
+                deadline = time.monotonic() + 5
+                while startup_attention.path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertFalse(startup_attention.path.exists())
+
+                def assert_no_turn_start(duration: float) -> None:
+                    deadline = time.monotonic() + duration
+                    while time.monotonic() < deadline:
+                        ready, _, _ = select.select([connection], [], [], 0.05)
+                        if not ready:
+                            continue
+                        message = receive_json()
+                        self.assertNotEqual(message.get("method"), "turn/start")
+
+                send_json(
+                    {
+                        "method": "turn/completed",
+                        "params": {"threadId": "thread-1", "turn": {"id": "turn-1"}},
+                    }
+                )
+                assert_no_turn_start(0.5)
+
+                send_json(
+                    {
+                        "method": "turn/started",
+                        "params": {
+                            "threadId": "thread-1",
+                            "turn": {"id": "user-turn"},
+                        },
+                    }
+                )
+                deferred = office.send("c", "cr", "deferred base", notify="idle")
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    log = (base / "bridge.log").read_text(encoding="utf-8")
+                    if "deferred-idle" in log and deferred.message_id in log:
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("base delivery was not deferred while the turn was active")
+
+                request_attention = office.request_notification(
+                    "c", "cr", deferred.message_id, notify="immediate"
+                )
+                steer = None
+                deadline = time.monotonic() + 5
+                while steer is None and time.monotonic() < deadline:
+                    message = receive_json()
+                    if message.get("method") == "turn/steer":
+                        steer = message
+                        send_json({"id": message["id"], "result": {}})
+                self.assertIsNotNone(steer)
+                self.assertEqual(
+                    steer["params"]["input"][0]["text"].count(deferred.message_id),
+                    1,
+                )
+                deadline = time.monotonic() + 5
+                while request_attention.path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertFalse(request_attention.path.exists())
+                send_json(
+                    {
+                        "method": "turn/completed",
+                        "params": {"threadId": "thread-1", "turn": {"id": "user-turn"}},
+                    }
+                )
+                assert_no_turn_start(0.75)
+            finally:
+                if connection is not None:
+                    connection.close()
+                listener.close()
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=3)
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+
     @unittest.skipUnless(shutil.which("codex"), "Codex CLI is not installed")
     def test_real_codex_tool_subprocess_inherits_explicit_role(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

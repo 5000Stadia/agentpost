@@ -200,6 +200,14 @@ class DeliveryResult:
 
 
 @dataclass(frozen=True)
+class NotificationRequest:
+    request_id: str
+    message_id: str
+    notify: str
+    path: Path
+
+
+@dataclass(frozen=True)
 class FanoutResult:
     message_id: str
     deliveries: tuple[DeliveryResult, ...]
@@ -652,6 +660,78 @@ class PostOffice:
             notify=notify,
             in_reply_to=original.message_id,
         )
+
+    def request_notification(
+        self,
+        sender: str,
+        recipient: str,
+        message_id: str,
+        *,
+        notify: str | None = None,
+    ) -> NotificationRequest:
+        """Queue a fresh attention pointer for an existing unread sender copy."""
+        self._require_agent(sender)
+        recipient_dir = self._require_agent(recipient)
+        record = self.read(recipient, message_id, states=("unread",))
+        if record.letter.from_agent != sender:
+            raise AgentPostError(
+                f"only the original sender {record.letter.from_agent} may re-notify "
+                f"{record.letter.message_id}"
+            )
+        mode = notify or record.letter.notify
+        if mode not in NOTIFY_MODES:
+            raise ValueError(f"invalid notify mode: {mode}")
+        request_id = uuid.uuid4().hex
+        directory = recipient_dir / "adapter" / "notifications"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{time.time_ns():020d}--{request_id}.json"
+        _atomic_write(
+            path,
+            json.dumps(
+                {
+                    "version": 1,
+                    "request_id": request_id,
+                    "message_id": record.letter.message_id,
+                    "notify": mode,
+                    "requested_by": sender,
+                    "created_at": time.time(),
+                },
+                sort_keys=True,
+            ).encode("utf-8"),
+        )
+        return NotificationRequest(request_id, record.letter.message_id, mode, path)
+
+    def notification_requests(self, agent: str) -> tuple[NotificationRequest, ...]:
+        """Return valid pending attention pointers, pruning stale/malformed markers."""
+        agent_dir = self._require_agent(agent)
+        directory = agent_dir / "adapter" / "notifications"
+        requests = []
+        for path in sorted(directory.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                request_id = str(data["request_id"])
+                if not re.fullmatch(r"[0-9a-f]{32}", request_id):
+                    raise ValueError("invalid request id")
+                message_id = _canonical_message_id(str(data["message_id"]))
+                notify = str(data["notify"])
+                if notify not in NOTIFY_MODES:
+                    raise ValueError("invalid notify mode")
+                self.read(agent, message_id, states=("unread",))
+            except (KeyError, OSError, ValueError, json.JSONDecodeError, AgentPostError):
+                path.unlink(missing_ok=True)
+                continue
+            requests.append(NotificationRequest(request_id, message_id, notify, path))
+        return tuple(requests)
+
+    def acknowledge_notification(self, agent: str, request_id: str) -> bool:
+        if not re.fullmatch(r"[0-9a-f]{32}", request_id):
+            raise ValueError("invalid notification request id")
+        agent_dir = self._require_agent(agent)
+        directory = agent_dir / "adapter" / "notifications"
+        matches = tuple(directory.glob(f"*--{request_id}.json"))
+        for path in matches:
+            path.unlink(missing_ok=True)
+        return bool(matches)
 
     def list_messages(self, agent: str, state: str = "unread") -> tuple[MessageRecord, ...]:
         if state not in {"unread", "read", "sent"}:

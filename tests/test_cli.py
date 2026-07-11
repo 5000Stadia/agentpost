@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,14 @@ from agentpost.cli import _infer_join_agent, _join, main  # noqa: E402
 
 class JoinCommandTest(unittest.TestCase):
     def setUp(self) -> None:
+        self.agentpost_environment = {
+            name: os.environ.pop(name, None)
+            for name in (
+                "AGENTPOST_AGENT",
+                "AGENTPOST_CODEX_BRIDGE",
+                "AGENTPOST_ROOT",
+            )
+        }
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / "post"
         self.project = Path(self.temp.name) / "application"
@@ -45,6 +54,10 @@ class JoinCommandTest(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
+        for name, value in self.agentpost_environment.items():
+            os.environ.pop(name, None)
+            if value is not None:
+                os.environ[name] = value
         self.temp.cleanup()
 
     def test_bare_join_resolves_and_is_idempotent(self) -> None:
@@ -154,6 +167,57 @@ class JoinCommandTest(unittest.TestCase):
                 )
         self.assertEqual(result, 0)
         self.assertEqual(self.office.list_messages("pb")[0].letter.notify, "immediate")
+
+    def test_sender_can_re_notify_existing_unread_mail_without_resending(self) -> None:
+        sent = self.office.send("app", "pb", "Existing review request.")
+        output = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stdout(output), redirect_stderr(StringIO()):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "notify",
+                        "Pattern Buffer",
+                        sent.message_id,
+                        "--mode",
+                        "immediate",
+                    ]
+                )
+        self.assertEqual(result, 0)
+        self.assertIn(f"NOTIFY\t{sent.message_id}", output.getvalue())
+        requests = self.office.notification_requests("pb")
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].notify, "immediate")
+        self.assertEqual(len(self.office.list_messages("pb", "unread")), 1)
+
+    def test_bare_doctor_infers_agent_and_project_from_workspace(self) -> None:
+        with patch("agentpost.cli.Path.cwd", return_value=self.project):
+            with patch("agentpost.cli.doctor", return_value=()) as run_doctor:
+                with redirect_stdout(StringIO()):
+                    result = main(["--root", str(self.root), "doctor"])
+        self.assertEqual(result, 0)
+        called = run_doctor.call_args.args
+        self.assertEqual(called[1:], ("app", self.project, None))
+
+    def test_offline_delivery_warning_is_concise(self) -> None:
+        output = StringIO()
+        errors = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stdout(output), redirect_stderr(errors):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "message",
+                        "pb",
+                        "Queued message.",
+                    ]
+                )
+        self.assertEqual(result, 0)
+        self.assertIn("recipient offline; queued for its next adapter start", errors.getvalue())
+        self.assertNotIn("notifier not armed", errors.getvalue())
+        self.assertNotIn("generation", errors.getvalue().lower())
 
     def test_optional_channel_bodies_may_follow_flags(self) -> None:
         request = self.office.send("pb", "app", "Please reply.")

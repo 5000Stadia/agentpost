@@ -24,6 +24,10 @@ after observing its stated result; record Message-IDs for mail-flow evidence.
   role `cr` while the workspace default is `c`, executes `agentpost identify`
   through token-free `command/exec`, and observes `cr`; all launcher children
   receive the same resolved identity environment.
+- [x] Token-free managed-bridge acceptance batches all queued startup IDs into
+  one turn, then re-notifies an already-known unread ID through `turn/steer`
+  without copying or claiming the letter; the disposable attention request is
+  acknowledged after surfacing.
 - [x] Kernos independently returned full-diff GREEN, then focused GREEN after
   both review notes were implemented; its final independent run passed all 112
   tests.

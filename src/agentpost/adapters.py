@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterator, Protocol
 
 from .core import MessageRecord, PostOffice
@@ -86,13 +86,29 @@ class MailboxWatcher:
 
     def pending(self) -> tuple[MessageRecord, ...]:
         records = self.office.list_messages(self.agent, "unread")
-        fresh = tuple(
-            record
-            for record in records
-            if record.letter.message_id not in self._surfaced
-        )
+        requests = self.office.notification_requests(self.agent)
+        forced = {}
+        for request in requests:
+            previous = forced.get(request.message_id)
+            forced[request.message_id] = (
+                "immediate"
+                if request.notify == "immediate" or previous == "immediate"
+                else "idle"
+            )
+        fresh = []
+        for record in records:
+            message_id = record.letter.message_id
+            if message_id in self._surfaced and message_id not in forced:
+                continue
+            if message_id in forced and record.letter.notify != forced[message_id]:
+                record = replace(record, letter=replace(record.letter, notify=forced[message_id]))
+            fresh.append(record)
+        delivered = {record.letter.message_id for record in fresh}
+        for request in requests:
+            if request.message_id in delivered:
+                self.office.acknowledge_notification(self.agent, request.request_id)
         self._surfaced.update(record.letter.message_id for record in fresh)
-        return fresh
+        return tuple(fresh)
 
     def events(self) -> Iterator[MessageRecord]:
         while True:

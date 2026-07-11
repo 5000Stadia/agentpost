@@ -12,6 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from agentpost import (  # noqa: E402
+    AgentPostError,
     DuplicateDeliveryError,
     Experience,
     InvalidMessageError,
@@ -343,6 +344,28 @@ class PostOfficeTest(unittest.TestCase):
         self.assertEqual(letter.subject, "Re: Decision")
         self.assertEqual(letter.from_agent, "k")
         self.assertEqual(letter.to_agent, "cx")
+
+    def test_sender_can_request_fresh_attention_for_existing_unread_mail(self) -> None:
+        sent = self.office.send("cx", "k", "Please revisit this.")
+        request = self.office.request_notification(
+            "cx", "k", sent.message_id, notify="immediate"
+        )
+        self.assertTrue(request.path.is_file())
+        self.assertEqual(request.message_id, sent.message_id)
+        self.assertEqual(request.notify, "immediate")
+        self.assertEqual(self.office.notification_requests("k"), (request,))
+        self.assertTrue(self.office.acknowledge_notification("k", request.request_id))
+        self.assertEqual(self.office.notification_requests("k"), ())
+        self.assertEqual(len(self.office.list_messages("k", "unread")), 1)
+
+    def test_notification_request_requires_original_sender_and_unread_mail(self) -> None:
+        self.office.register_profile(profile("pb"))
+        sent = self.office.send("cx", "k", "Sender-owned pointer.")
+        with self.assertRaisesRegex(AgentPostError, "only the original sender cx"):
+            self.office.request_notification("pb", "k", sent.message_id)
+        self.office.claim("k", sent.message_id)
+        with self.assertRaises(MessageNotFoundError):
+            self.office.request_notification("cx", "k", sent.message_id)
 
     def test_fanout_uses_one_id_and_preserves_full_audience(self) -> None:
         self.office.register_profile(profile("pb"))

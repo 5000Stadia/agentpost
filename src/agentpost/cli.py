@@ -21,6 +21,7 @@ from .adapters import MailboxWatcher
 from .installer import armed, doctor, install, uninstall
 from .presence import agent_presence
 from .native import (
+    acknowledge_notifications,
     antigravity_hook,
     antigravity_launch,
     claude_launch,
@@ -198,6 +199,12 @@ def build_parser() -> argparse.ArgumentParser:
     channel_question.add_argument("--wait", type=float)
     channel_question.add_argument("--quorum", type=int)
 
+    renotify = commands.add_parser("notify")
+    renotify.add_argument("recipient")
+    renotify.add_argument("message_id")
+    renotify.add_argument("--from", dest="sender")
+    renotify.add_argument("--mode", choices=("idle", "immediate"))
+
     panel = commands.add_parser("panel")
     panel.add_argument("originator")
     panel.add_argument("message_id")
@@ -242,6 +249,9 @@ def build_parser() -> argparse.ArgumentParser:
     native_antigravity.add_argument("event", choices=("pre-invocation", "stop"))
     native_snapshot = commands.add_parser("internal-snapshot")
     native_snapshot.add_argument("agent")
+    native_ack = commands.add_parser("internal-notification-ack")
+    native_ack.add_argument("agent")
+    native_ack.add_argument("request_ids", nargs="+")
     codex = commands.add_parser("codex")
     codex.add_argument("--agent")
     codex.add_argument("codex_args", nargs=argparse.REMAINDER)
@@ -256,8 +266,8 @@ def build_parser() -> argparse.ArgumentParser:
     install_command.add_argument("--agent", required=True)
     install_command.add_argument("--project", type=Path, required=True)
     doctor_command = commands.add_parser("doctor")
-    doctor_command.add_argument("agent")
-    doctor_command.add_argument("--project", type=Path, required=True)
+    doctor_command.add_argument("agent", nargs="?")
+    doctor_command.add_argument("--project", type=Path, default=Path.cwd())
     doctor_command.add_argument(
         "--cli", choices=("antigravity", "claude", "codex", "python")
     )
@@ -471,6 +481,18 @@ def main(argv: list[str] | None = None) -> int:
                 _print_panel(status)
                 if not status.complete:
                     return 2
+        elif args.command == "notify":
+            sender = _channel_sender(office, args.sender)
+            recipient = resolve_identity(office, args.recipient).name
+            request = office.request_notification(
+                sender,
+                recipient,
+                args.message_id,
+                notify=args.mode,
+            )
+            print(f"NOTIFY\t{request.message_id}")
+            print(f"FROM\t{sender}")
+            print(f"TO\t{recipient}\t{request.notify}")
         elif args.command == "panel":
             _print_panel(
                 panel_status(
@@ -537,6 +559,8 @@ def main(argv: list[str] | None = None) -> int:
             return antigravity_hook(args.event)
         elif args.command == "internal-snapshot":
             return codex_snapshot(office, args.agent)
+        elif args.command == "internal-notification-ack":
+            return acknowledge_notifications(office, args.agent, args.request_ids)
         elif args.command == "codex":
             return codex_launch(
                 office,
@@ -561,7 +585,13 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "install":
             install(office, args.cli, args.agent, args.project)
         elif args.command == "doctor":
-            checks = doctor(office, args.agent, args.project, args.cli)
+            agent = args.agent or identify_agent(
+                office,
+                args.project,
+                cli=args.cli,
+                agent=os.environ.get("AGENTPOST_AGENT"),
+            ).name
+            checks = doctor(office, agent, args.project, args.cli)
             for check in checks:
                 print(f"{'PASS' if check.ok else 'FAIL'}\t{check.name}\t{check.detail}")
             return 0 if all(check.ok for check in checks) else 1
@@ -801,8 +831,13 @@ def _warn_unarmed(office: PostOffice, recipients) -> None:
     for recipient in recipients:
         is_armed, detail = armed(office, recipient)
         if not is_armed:
+            disposition = (
+                "recipient offline; queued for its next adapter start"
+                if "no live mailbox consumer" in detail
+                else "live wake unavailable; queued for the next supported boundary"
+            )
             print(
-                f"agentpost: delivered to {recipient}; notifier not armed: {detail}",
+                f"agentpost: delivered to {recipient}; {disposition}",
                 file=sys.stderr,
             )
 

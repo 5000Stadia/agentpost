@@ -102,6 +102,14 @@ Directory search and role/project/specialty selectors exclude offline agents by
 default. Exact mailbox names and explicit named groups may target offline
 agents. Delivery still commits to `unread/`; only notification is unavailable.
 
+An original sender may append an ephemeral attention request under
+`agents/RECIPIENT/adapter/notifications/` for an existing unread Message-ID.
+Adapters consume that request only after surfacing the exact original ID; the
+immutable letter is neither copied nor claimed. Stale requests are pruned when
+their target is no longer unread. Startup catch-up batches every queued unread
+ID into the first native notification turn instead of allowing the first item
+to defer the rest.
+
 Human-facing channel resolution is a separate operation from active-agent
 discovery. `resolve` and the `message`/`question` commands match registered
 canonical names, display names, project identities, and responsibility handles;

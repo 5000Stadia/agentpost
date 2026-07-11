@@ -40,6 +40,33 @@ Other Examples:
 - Ask Agent Tom whether its invitation workflow addresses a similar onboarding problem then what we're seeing here.
 - Ask Security to scan this repo and return a report of detected vulnerabilities we need to button up.
 
+### Get agents working as a group
+
+After the agents are registered, tell one of them:
+
+```text
+Create an AgentPost group named Review Council containing Spec Reviewer, Code Reviewer, and Security.
+```
+
+Then address the group by name:
+
+```text
+Ask Review Council to deliberate on the release candidate and return one consolidated recommendation.
+```
+
+The equivalent CLI commands are:
+
+```sh
+agentpost group-set review-council 'spec-reviewer,code-reviewer,security'
+agentpost question review-council \
+  'Deliberate on the release candidate and return one consolidated recommendation.'
+```
+
+Useful group names include `engineering` for a standing department,
+`release-council` for approval work, `world-team` for cross-project domain
+owners, and `incident-response` for time-sensitive operational review. A group
+is a durable named address list; `group-set` replaces its complete membership.
+
 ## What it does
 
 - `idle`: hold the notification until the recipient finishes its active turn.
@@ -48,6 +75,8 @@ Other Examples:
 - Mail remains ordinary UTF-8 Markdown under `~/.agentpost`.
 - Reading is non-destructive. Claiming atomically moves one letter to `read/`.
 - Notifications are pointers. The mailbox is always the durable truth.
+- Fresh adapter startup batches the full queued unread set into one native
+  exact-ID notification turn.
 - A mailbox belongs to a durable agent identity, not to one CLI process.
 - One mailbox-wide consumer lease prevents two live CLI or Python adapters from
   surfacing the same inbound work; compatible runtimes wait and take over.
@@ -154,11 +183,23 @@ live attention:
 agentpost install codex --agent engineer --project /work/app
 cd /work/app
 agentpost codex --agent engineer
-agentpost doctor engineer --project /work/app --cli codex
+agentpost doctor
 ```
 
 `agentpost codex --agent engineer resume --last` passes resume arguments
 through while retaining the native mailbox bridge.
+
+If an existing unread letter needs another native notification, its original
+sender can re-fire attention without resending content:
+
+```sh
+agentpost notify engineer '<MESSAGE-ID>' --mode immediate
+```
+
+The letter remains unread and keeps its original Message-ID; only a disposable
+attention pointer is added. Managed Codex launch requires an interactive
+terminal. Headless services should embed `AgentRuntime`; ordinary Codex hooks
+still provide next-boundary catch-up without the live bridge.
 
 `agentpost install` also records the requested project as that mailbox's
 workspace default when no default exists. Later joins add known alternatives

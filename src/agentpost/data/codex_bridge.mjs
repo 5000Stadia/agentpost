@@ -12,13 +12,13 @@ let threadId = null;
 let turnId = null;
 let active = false;
 let known = new Set();
-let deferred = new Set();
+let deferred = new Map();
 let pollRunning = false;
 
 socket.addEventListener("open", async () => {
   try {
     await request("initialize", {
-      clientInfo: { name: "agentpost", title: "AgentPost", version: "0.0.12" },
+      clientInfo: { name: "agentpost", title: "AgentPost", version: "0.0.13" },
       capabilities: {
         experimentalApi: true,
         requestAttestation: false,
@@ -29,9 +29,9 @@ socket.addEventListener("open", async () => {
     threadId = await waitForLoadedThread();
     trace("attached", { threadId });
     writePresence("idle");
+    await initialCatchup();
     setInterval(poll, 250).unref();
     setInterval(() => writePresence(active ? "working" : "idle"), 1000).unref();
-    await poll();
     process.stderr.write(`agentpost: Codex mailbox bridge attached to ${options.agent}\n`);
   } catch (error) {
     fail(error);
@@ -84,24 +84,55 @@ async function poll() {
   pollRunning = true;
   try {
     const messages = await snapshot();
-    const current = new Set(messages.map((item) => item.message_id));
+    const current = new Set(messages.map(deliveryId));
+    const currentMessages = new Set(messages.map((item) => item.message_id));
     known = new Set([...known].filter((id) => current.has(id)));
-    deferred = new Set([...deferred].filter((id) => current.has(id)));
+    deferred = new Map(
+      [...deferred].filter(([messageId]) => currentMessages.has(messageId)),
+    );
+    const fresh = [];
     for (const item of messages) {
-      if (known.has(item.message_id)) continue;
-      known.add(item.message_id);
-      if (active && item.notify === "idle") {
-        deferred.add(item.message_id);
-        trace("deferred-idle", { messageId: item.message_id });
-      } else {
-        await deliver([item.message_id], item.notify);
-      }
+      const key = deliveryId(item);
+      if (known.has(key)) continue;
+      known.add(key);
+      fresh.push(item);
+    }
+    const groups = coalesce(fresh).map((item) =>
+      mergeDelivery(deferred.get(item.message_id), item),
+    );
+    if (!groups.length) return;
+    if (!active) {
+      const mode = strongestMode(groups);
+      await deliver(groups, mode);
+      return;
+    }
+    const immediate = groups.filter((item) => item.notify === "immediate");
+    const idle = groups.filter((item) => item.notify === "idle");
+    idle.forEach((item) => defer(item));
+    if (idle.length) {
+      trace("deferred-idle", { ids: idle.map((item) => item.message_id) });
+    }
+    if (immediate.length) {
+      await deliver(immediate, "immediate");
     }
   } catch (error) {
     process.stderr.write(`agentpost: Codex mailbox poll failed: ${error.message}\n`);
   } finally {
     pollRunning = false;
   }
+}
+
+async function initialCatchup() {
+  const messages = await snapshot();
+  if (!messages.length) return;
+  messages.forEach((item) => known.add(deliveryId(item)));
+  const groups = coalesce(messages);
+  const mode = strongestMode(groups);
+  await deliver(groups, mode);
+  trace("startup-catchup", {
+    ids: [...new Set(messages.map((item) => item.message_id))],
+    deliveries: messages.length,
+  });
 }
 
 async function refreshTurnId() {
@@ -119,7 +150,8 @@ async function refreshTurnId() {
   }
 }
 
-async function deliver(ids, mode) {
+async function deliver(items, mode) {
+  const ids = items.map((item) => item.message_id);
   const text =
     `AgentPost ${mode} mail is waiting for ${options.agent}: ${ids.join(", ")}. ` +
     "Load the agentpost skill and process exactly the listed Message-ID(s). Do not " +
@@ -136,15 +168,17 @@ async function deliver(ids, mode) {
         input,
       });
       trace("steered", { ids, turnId });
+      ids.forEach((id) => deferred.delete(id));
+      await acknowledge(items);
       return;
     } catch {
-      deferred = new Set([...deferred, ...ids]);
+      items.forEach((item) => defer(item));
       trace("steer-deferred", { ids, turnId });
       return;
     }
   }
   if (active) {
-    deferred = new Set([...deferred, ...ids]);
+    items.forEach((item) => defer(item));
     trace("active-deferred", { ids, mode, turnId });
     return;
   }
@@ -158,6 +192,8 @@ async function deliver(ids, mode) {
   });
   turnId = result?.turn?.id || null;
   trace("turn-start-request", { ids, mode, turnId });
+  ids.forEach((id) => deferred.delete(id));
+  await acknowledge(items);
 }
 
 async function onIdle() {
@@ -166,13 +202,13 @@ async function onIdle() {
   writePresence("idle");
   turnId = null;
   if (deferred.size) {
-    const ids = [...deferred];
+    const items = [...deferred.values()];
     deferred.clear();
     try {
-      await deliver(ids, "idle");
+      await deliver(items, strongestMode(items));
     } catch (error) {
       process.stderr.write(`agentpost: deferred Codex delivery failed: ${error.message}\n`);
-      ids.forEach((id) => deferred.add(id));
+      items.forEach((item) => defer(item));
     }
   }
 }
@@ -202,6 +238,61 @@ function snapshot() {
             reject(parseError);
           }
         }
+      },
+    );
+  });
+}
+
+function deliveryId(item) {
+  return item.delivery_id || `mail:${item.message_id}`;
+}
+
+function coalesce(items) {
+  const groups = new Map();
+  for (const item of items) {
+    groups.set(item.message_id, mergeDelivery(groups.get(item.message_id), {
+      message_id: item.message_id,
+      notify: item.notify,
+      request_ids: item.request_id ? [item.request_id] : [],
+    }));
+  }
+  return [...groups.values()];
+}
+
+function mergeDelivery(existing, incoming) {
+  if (!existing) return incoming;
+  return {
+    message_id: incoming.message_id,
+    notify:
+      existing.notify === "immediate" || incoming.notify === "immediate"
+        ? "immediate"
+        : "idle",
+    request_ids: [...new Set([
+      ...(existing.request_ids || []),
+      ...(incoming.request_ids || []),
+    ])],
+  };
+}
+
+function strongestMode(items) {
+  return items.some((item) => item.notify === "immediate") ? "immediate" : "idle";
+}
+
+function defer(item) {
+  deferred.set(item.message_id, mergeDelivery(deferred.get(item.message_id), item));
+}
+
+function acknowledge(items) {
+  const requestIds = [...new Set(items.flatMap((item) => item.request_ids || []))];
+  if (!requestIds.length) return Promise.resolve();
+  return new Promise((resolve) => {
+    execFile(
+      "agentpost",
+      ["--root", options.root, "internal-notification-ack", options.agent, ...requestIds],
+      { cwd: options.cwd, encoding: "utf8", timeout: 5000 },
+      (error, _stdout, stderr) => {
+        if (error) trace("notification-ack-failed", { requestIds, error: stderr.trim() });
+        resolve();
       },
     );
   });

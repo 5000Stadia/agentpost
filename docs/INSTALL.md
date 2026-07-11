@@ -177,6 +177,11 @@ directs the agent to continue in the existing session. The conservative
 fallback still explains that a matching bridge may be the current session;
 an unrelated live consumer remains an ordinary exclusivity error.
 
+`agentpost codex` is interactive-terminal only. It fails before acquiring a
+consumer lease when stdin is not a TTY and names the supported alternatives:
+ordinary Codex lifecycle catch-up for next-boundary delivery, or embedded
+`AgentRuntime` for a headless service requiring a live scheduler.
+
 ## Claude Code
 
 ```sh
@@ -214,7 +219,7 @@ the same commands and therefore retain that trust. Reload a process that
 predates the prompt hook. Then:
 
 ```sh
-agentpost doctor app --project /work/application --cli codex
+agentpost doctor
 cd /work/application
 agentpost codex --agent app
 ```
@@ -226,6 +231,19 @@ This does not invoke a model. Immediately after install it may report
 `unobserved`; reload Codex, submit one prompt, and let that turn complete to
 close all three event checks. A stale or ambiguous generation remains a failure
 with precise approval, reinstall, and reload instructions.
+
+From a bound project root, bare `agentpost doctor` infers both mailbox and
+project using the same explicit-process/workspace resolution as `identify`.
+The explicit `AGENT --project PATH --cli CLI` form remains available for
+diagnosing another workspace.
+
+On managed startup, all queued unread Message-IDs are named together in the
+first native notification turn. To re-fire attention for one existing unread
+letter without duplicating it, its sender runs:
+
+```sh
+agentpost notify RECIPIENT MESSAGE_ID --mode immediate
+```
 
 Ordinary `codex` sessions check unread mail at startup, before every submitted
 prompt, and at turn completion without creating a polling conversation or
