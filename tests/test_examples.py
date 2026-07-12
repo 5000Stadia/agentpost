@@ -67,7 +67,7 @@ class DocumentationExampleTest(unittest.TestCase):
                 (ROOT / relative).read_text(encoding="utf-8"),
             )
         self.assertIn(
-            f"## [{version}] - 2026-07-11",
+            f"## [{version}] - 2026-07-12",
             (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"),
         )
         self.assertIn(

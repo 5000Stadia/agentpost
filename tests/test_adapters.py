@@ -446,7 +446,7 @@ lease.release()
         plugin_list = [
             {
                 "id": "agentpost@agentpost-local",
-                "version": "0.0.6",
+                "version": "0.0.7",
                 "enabled": True,
                 "projectPath": str(Path(self.temp.name) / "other"),
             },
@@ -468,12 +468,12 @@ lease.release()
         self.assertFalse(stale.ok)
         self.assertIn("stale version 0.0.4", stale.detail)
 
-        plugin_list[1]["version"] = "0.0.6"
+        plugin_list[1]["version"] = "0.0.7"
         completed.stdout = json.dumps(plugin_list)
         with patch("agentpost.installer.subprocess.run", return_value=completed):
             current = _doctor_claude(project)[0]
         self.assertTrue(current.ok)
-        self.assertEqual(_claude_plugin_version(), "0.0.6")
+        self.assertEqual(_claude_plugin_version(), "0.0.7")
 
     def test_codex_snapshot_is_machine_readable_and_non_claiming(self) -> None:
         office = self.office()

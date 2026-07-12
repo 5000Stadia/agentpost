@@ -4,7 +4,7 @@ set -eu
 python=${PYTHON:-python3}
 install_dir=${AGENTPOST_INSTALL_DIR:-"$HOME/.local/share/agentpost/venv"}
 bin_dir=${AGENTPOST_BIN_DIR:-"$HOME/.local/bin"}
-source=${AGENTPOST_SOURCE:-"git+https://github.com/5000Stadia/agentpost.git@v1.0.0"}
+source=${AGENTPOST_SOURCE:-"git+https://github.com/5000Stadia/agentpost.git@v1.1.0"}
 connection_mode=${AGENTPOST_CONNECTION_MODE:-auto}
 
 if ! command -v "$python" >/dev/null 2>&1; then

@@ -65,6 +65,24 @@ Markdown body.
 `X-Agent-Notify` are generated and validated by AgentPost. Header injection and
 path-like agent names are rejected.
 
+Verified repository review questions add machine-readable artifact headers:
+
+```text
+X-Agent-Review-Repository: /work/project
+X-Agent-Review-Commit: 0123456789abcdef0123456789abcdef01234567
+X-Agent-Review-Parent: 89abcdef0123456789abcdef0123456789abcdef
+X-Agent-Review-Path: src/module.py
+X-Agent-Review-Path: tests/test_module.py
+X-Agent-Review-Test: tests/test_module.py::ModuleTest::test_behavior
+```
+
+`review` resolves the worktree root, requires the commit and optional direct
+parent to be explicit commit-object SHAs, verifies every path and test file in
+that immutable tree, and renders the canonical artifact block before delivery.
+Structured fields reject command substitution, backquotes, shell separators
+`|`, `;`, and `&`, redirection/placeholder characters `<` and `>`, and control
+characters. Any failure occurs before recipient or sender mail is written.
+
 ## Presence and routing
 
 AgentPost has no coordinator, leader, primary mailbox, or resident post-office
@@ -143,10 +161,14 @@ if notification ownership is misconfigured. The lease prevents duplicate
 wake/model work before claim; atomic claim is the final defense. AgentPost does
 not promise exactly-once execution if a consumer crashes after claim.
 
-Replies carry `In-Reply-To`. Group panels are derived from immutable sent/read
-mail rather than maintained as a mutable database row. The first terminal
-answer or error from each expected responder counts; later responses remain
-visible as duplicates.
+Replying also atomically claims an exact original when it is still unread;
+already-read originals remain replyable for corrections. Validation failure
+occurs before claim. A delivery failure after claim leaves the original read
+because recipient delivery may already have committed; retry uses the
+already-read correction path. Replies carry `In-Reply-To`. Group panels are
+derived from immutable sent/read mail rather than maintained as a mutable
+database row. The first terminal answer or error from each expected responder
+counts; later responses remain visible as duplicates.
 
 Notification adapters receive only committed Message-IDs. Adapter failure does
 not roll back delivery, and adapter state is never authoritative for unread

@@ -25,6 +25,7 @@ MESSAGE_KINDS = {"letter", "question", "answer", "error"}
 NOTIFY_MODES = {"immediate", "idle"}
 MAILBOX_DIRS = ("tmp", "unread", "read", "sent", "adapter")
 CONNECTION_MODES = {"auto", "manual"}
+FULL_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 PRIVATE_DIRECTORY_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600
 
@@ -102,6 +103,29 @@ class Binding:
 
 
 @dataclass(frozen=True)
+class ReviewArtifact:
+    repository: str
+    commit: str
+    paths: tuple[str, ...]
+    tests: tuple[str, ...]
+    parent: str | None = None
+
+    def validate(self) -> None:
+        if not self.repository:
+            raise ValueError("review repository must not be empty")
+        if not FULL_COMMIT_RE.fullmatch(self.commit):
+            raise ValueError("review commit must be a canonical full SHA")
+        if self.parent is not None and not FULL_COMMIT_RE.fullmatch(self.parent):
+            raise ValueError("review parent must be a canonical full SHA")
+        if not self.paths:
+            raise ValueError("review needs at least one path assertion")
+        if not self.tests:
+            raise ValueError("review needs at least one test assertion")
+        if any(not value for value in (*self.paths, *self.tests)):
+            raise ValueError("review assertions must not be empty")
+
+
+@dataclass(frozen=True)
 class Letter:
     message_id: str
     date: str
@@ -115,9 +139,10 @@ class Letter:
     in_reply_to: str | None = None
     route_query: str | None = None
     route_reason: str | None = None
+    review: ReviewArtifact | None = None
 
     def as_bytes(self) -> bytes:
-        headers = (
+        headers = [
             ("Message-ID", self.message_id),
             ("Date", self.date),
             ("From", self.from_agent),
@@ -129,7 +154,18 @@ class Letter:
             ("X-Agent-Notify", self.notify),
             ("X-Agent-Route-Query", self.route_query),
             ("X-Agent-Route-Reason", self.route_reason),
-        )
+        ]
+        if self.review is not None:
+            self.review.validate()
+            headers.extend(
+                (
+                    ("X-Agent-Review-Repository", self.review.repository),
+                    ("X-Agent-Review-Commit", self.review.commit),
+                    ("X-Agent-Review-Parent", self.review.parent),
+                )
+            )
+            headers.extend(("X-Agent-Review-Path", path) for path in self.review.paths)
+            headers.extend(("X-Agent-Review-Test", test) for test in self.review.tests)
         lines = []
         for name, value in headers:
             if value is not None:
@@ -169,6 +205,7 @@ class Letter:
             body = data.split(separator, 1)[1].decode("utf-8")
         except UnicodeDecodeError as exc:
             raise InvalidMessageError("message body is not valid UTF-8") from exc
+        review = _parse_review_artifact(message)
         return cls(
             message_id=str(message["Message-ID"]),
             date=str(message["Date"]),
@@ -192,6 +229,7 @@ class Letter:
                 if message.get("X-Agent-Route-Reason")
                 else None
             ),
+            review=review,
         )
 
 
@@ -535,6 +573,7 @@ class PostOffice:
         in_reply_to: str | None = None,
         route_query: str | None = None,
         route_reason: str | None = None,
+        review: ReviewArtifact | None = None,
     ) -> DeliveryResult:
         result = self.send_many(
             sender,
@@ -547,6 +586,7 @@ class PostOffice:
             in_reply_to=in_reply_to,
             route_query=route_query,
             route_reasons={recipient: route_reason} if route_reason else None,
+            review=review,
         )
         if result.failures:
             raise AgentPostError(result.failures[0][1])
@@ -565,6 +605,7 @@ class PostOffice:
         in_reply_to: str | None = None,
         route_query: str | None = None,
         route_reasons: dict[str, str] | None = None,
+        review: ReviewArtifact | None = None,
     ) -> FanoutResult:
         sender_dir = self._require_agent(sender)
         roster = tuple(dict.fromkeys(recipients))
@@ -579,6 +620,11 @@ class PostOffice:
             raise ValueError(f"invalid notify mode: {notify}")
         if not body:
             raise ValueError("message body must not be empty")
+        if review is not None:
+            review.validate()
+            from .review import verify_review_artifact
+
+            verify_review_artifact(review)
 
         logical_id = (
             _canonical_message_id(message_id)
@@ -618,6 +664,7 @@ class PostOffice:
                     in_reply_to=in_reply_to,
                     route_query=route_query,
                     route_reason=(route_reasons or {}).get(name),
+                    review=review,
                 ).as_bytes()
             sent_data = Letter(
                 message_id=logical_id,
@@ -631,6 +678,7 @@ class PostOffice:
                 subject=subject,
                 in_reply_to=in_reply_to,
                 route_query=route_query,
+                review=review,
             ).as_bytes()
 
             delivered_paths = []
@@ -683,12 +731,28 @@ class PostOffice:
         body: str,
         *,
         subject: str | None = None,
-        notify: str = "immediate",
+        notify: str | None = None,
     ) -> DeliveryResult:
-        original = self.read(replier, original_message_id).letter
+        inspected = self.read(replier, original_message_id)
         reply_subject = subject
-        if reply_subject is None and original.subject:
-            reply_subject = f"Re: {original.subject}"
+        if reply_subject is None and inspected.letter.subject:
+            reply_subject = f"Re: {inspected.letter.subject}"
+        if not body:
+            raise ValueError("message body must not be empty")
+        reply_notify = notify or (
+            "immediate" if inspected.letter.kind == "question" else "idle"
+        )
+        if reply_notify not in NOTIFY_MODES:
+            raise ValueError(f"invalid notify mode: {reply_notify}")
+        if reply_subject is not None:
+            _header_line("Subject", reply_subject)
+        self._require_agent(inspected.letter.from_agent)
+
+        original = (
+            self.claim(replier, original_message_id).letter
+            if inspected.state == "unread"
+            else inspected.letter
+        )
         kind = "answer" if original.kind == "question" else "letter"
         return self.send(
             replier,
@@ -696,7 +760,7 @@ class PostOffice:
             body,
             subject=reply_subject,
             kind=kind,
-            notify=notify,
+            notify=reply_notify,
             in_reply_to=original.message_id,
         )
 
@@ -937,6 +1001,41 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace(
         "+00:00", "Z"
     )
+
+
+def _parse_review_artifact(message) -> ReviewArtifact | None:
+    names = (
+        "X-Agent-Review-Repository",
+        "X-Agent-Review-Commit",
+        "X-Agent-Review-Parent",
+        "X-Agent-Review-Path",
+        "X-Agent-Review-Test",
+    )
+    if not any(message.get_all(name) for name in names):
+        return None
+
+    def one(name: str, *, required: bool) -> str | None:
+        values = message.get_all(name, [])
+        if not values:
+            if required:
+                raise InvalidMessageError(f"missing review header: {name}")
+            return None
+        if len(values) != 1:
+            raise InvalidMessageError(f"duplicate review header: {name}")
+        return str(values[0])
+
+    artifact = ReviewArtifact(
+        repository=one("X-Agent-Review-Repository", required=True) or "",
+        commit=one("X-Agent-Review-Commit", required=True) or "",
+        parent=one("X-Agent-Review-Parent", required=False),
+        paths=tuple(str(value) for value in message.get_all("X-Agent-Review-Path", [])),
+        tests=tuple(str(value) for value in message.get_all("X-Agent-Review-Test", [])),
+    )
+    try:
+        artifact.validate()
+    except ValueError as exc:
+        raise InvalidMessageError(str(exc)) from exc
+    return artifact
 
 
 def _header_line(name: str, value: str) -> str:

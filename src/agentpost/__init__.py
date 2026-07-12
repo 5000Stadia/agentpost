@@ -11,6 +11,7 @@ from .core import (
     NotificationRequest,
     PostOffice,
     Profile,
+    ReviewArtifact,
     UnknownAgentError,
 )
 from .channel import AgentChannel, Identity
@@ -27,6 +28,7 @@ from .routing import (
 from .presence import Presence, agent_presence
 from .runtime import AgentRuntime, Notification
 from .panels import PanelStatus, ask, panel_status, wait_for_panel
+from .review import ReviewPreflightError, prepare_review, render_review_request
 from .adapters import (
     Bell,
     BellCapabilities,
@@ -57,6 +59,8 @@ __all__ = [
     "PostOffice",
     "Profile",
     "RecordingBell",
+    "ReviewArtifact",
+    "ReviewPreflightError",
     "PanelStatus",
     "Presence",
     "Notification",
@@ -71,5 +75,7 @@ __all__ = [
     "resolve_group",
     "resolve_recipients",
     "resolve_identity",
+    "prepare_review",
+    "render_review_request",
     "wait_for_panel",
 ]

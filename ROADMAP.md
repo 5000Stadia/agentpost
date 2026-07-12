@@ -1,6 +1,6 @@
 # AgentPost Roadmap
 
-Last reviewed: 2026-07-11
+Last reviewed: 2026-07-12
 
 AgentPost v1.0.0 freezes the trusted-local filesystem core, Claude Code, Codex,
 Antigravity lifecycle, and CLI-neutral Python integration contracts. This file
@@ -29,6 +29,10 @@ Every required founder-observed and agent-owned closeout item is complete:
 
 The deployed-architecture and public-documentation council round robin is
 complete: K, PB, and Construct returned 3/3 GREEN with no blocking findings.
+
+AgentPost 1.1.0 adds fail-closed immutable repository-review envelopes and
+closes the answered-but-unread reply lifecycle defect without changing the
+trusted-local architecture.
 
 ## Antigravity CLI integration
 

@@ -15,7 +15,11 @@ documented migration and deprecation path.
   binding state.
 - Durable-delivery semantics: notification follows commit; inspection does not
   claim; claim targets one exact Message-ID; adapter failure does not remove
-  mail; replies preserve `In-Reply-To`.
+  mail; reply atomically claims an exact unread original while already-read
+  originals remain replyable; replies preserve `In-Reply-To`.
+- The documented `review` command and `AgentChannel.review()` fail-closed
+  repository-artifact contract, including canonical commit headers, direct
+  parent verification, commit-tree path assertions, and file-qualified tests.
 - Plugin-invoked CLI entry points and their argument shapes:
   `internal-claude-boundary`, `internal-claude-monitor`,
   `internal-codex-hook`, `internal-antigravity-hook`, `internal-snapshot`, and

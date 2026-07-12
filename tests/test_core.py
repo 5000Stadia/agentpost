@@ -460,6 +460,78 @@ class PostOfficeTest(unittest.TestCase):
         self.assertEqual(letter.subject, "Re: Decision")
         self.assertEqual(letter.from_agent, "k")
         self.assertEqual(letter.to_agent, "cx")
+        self.assertEqual(self.office.list_messages("k", "unread"), ())
+        self.assertEqual(
+            self.office.read("k", question.message_id, states=("read",)).state,
+            "read",
+        )
+
+    def test_reply_allows_corrections_to_an_already_read_original(self) -> None:
+        question = self.office.send("cx", "k", "Question?", kind="question")
+        self.office.claim("k", question.message_id)
+        first = self.office.reply("k", question.message_id, "First answer.")
+        second = self.office.reply("k", question.message_id, "Correction.")
+        self.assertEqual(
+            self.office.read("cx", first.message_id).letter.in_reply_to,
+            question.message_id,
+        )
+        self.assertEqual(
+            self.office.read("cx", second.message_id).letter.in_reply_to,
+            question.message_id,
+        )
+
+    def test_reply_validation_failure_leaves_original_unread(self) -> None:
+        question = self.office.send("cx", "k", "Question?", kind="question")
+        with self.assertRaisesRegex(ValueError, "body must not be empty"):
+            self.office.reply("k", question.message_id, "")
+        self.assertEqual(
+            self.office.read("k", question.message_id, states=("unread",)).state,
+            "unread",
+        )
+
+    def test_reply_delivery_failure_leaves_claimed_original_read(self) -> None:
+        question = self.office.send("cx", "k", "Question?", kind="question")
+        with patch.object(
+            self.office,
+            "send",
+            side_effect=AgentPostError("delivery state is ambiguous"),
+        ):
+            with self.assertRaisesRegex(AgentPostError, "delivery state is ambiguous"):
+                self.office.reply("k", question.message_id, "Answer.")
+        self.assertEqual(self.office.list_messages("k", "unread"), ())
+        self.assertEqual(
+            self.office.read("k", question.message_id, states=("read",)).state,
+            "read",
+        )
+
+    def test_competing_replies_that_observe_unread_have_one_winner(self) -> None:
+        question = self.office.send("cx", "k", "Question?", kind="question")
+        original_read = self.office.read
+        barrier = threading.Barrier(2)
+        outcomes: list[str] = []
+
+        def synchronized_read(agent, message_id, states=("unread", "read")):
+            record = original_read(agent, message_id, states)
+            if agent == "k" and record.letter.message_id == question.message_id:
+                barrier.wait()
+            return record
+
+        def reply() -> None:
+            try:
+                self.office.reply("k", question.message_id, "Answer.")
+                outcomes.append("sent")
+            except MessageNotFoundError:
+                outcomes.append("lost")
+
+        with patch.object(self.office, "read", side_effect=synchronized_read):
+            threads = [threading.Thread(target=reply) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertCountEqual(outcomes, ["sent", "lost"])
+        self.assertEqual(len(self.office.list_messages("cx", "unread")), 1)
 
     def test_sender_can_request_fresh_attention_for_existing_unread_mail(self) -> None:
         sent = self.office.send("cx", "k", "Please revisit this.")

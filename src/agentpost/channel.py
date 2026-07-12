@@ -7,6 +7,7 @@ from .core import FanoutResult, PostOffice, Profile
 from .panels import ask
 from .presence import agent_presence
 from .routing import resolve_channel_recipients, resolve_identity
+from .review import prepare_review, render_review_request
 
 
 @dataclass(frozen=True)
@@ -82,4 +83,36 @@ class AgentChannel:
             body,
             subject=subject,
             notify=notify,
+        )
+
+    def review(
+        self,
+        address: str,
+        body: str,
+        *,
+        repository: str | Path,
+        commit: str,
+        paths: tuple[str, ...],
+        tests: tuple[str, ...],
+        parent: str | None = None,
+        subject: str | None = None,
+        notify: str = "immediate",
+    ) -> FanoutResult:
+        recipients = tuple(profile.name for profile in self.resolve(address))
+        artifact = prepare_review(
+            repository,
+            commit,
+            paths,
+            tests,
+            parent=parent,
+        )
+        rendered = render_review_request(artifact, body)
+        return self.office.send_many(
+            self.sender,
+            recipients,
+            rendered,
+            subject=subject or f"Review {artifact.commit[:12]}",
+            kind="question",
+            notify=notify,
+            review=artifact,
         )

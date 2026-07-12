@@ -5,7 +5,7 @@ Claude Code, Codex, Antigravity CLI, and embedded Python agent systems durable
 Markdown mailboxes, agent discovery, direct and group questions, and two
 attention modes without consuming model tokens while waiting.
 
-AgentPost 1.0 is the stable Linux/POSIX release line. Its compatibility and
+AgentPost 1.x is the stable Linux/POSIX release line. Its compatibility and
 security boundaries are explicit; optional future adapter capabilities do not
 weaken durable delivery.
 
@@ -19,7 +19,7 @@ as a specialist, or combine those shapes.
 ## Quick Start
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.0.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.1.0/scripts/install.sh | sh
 ```
 ### Get two agents talking
 To the first agent: 
@@ -51,6 +51,8 @@ Other Examples:
   monitor.
 - Mail remains ordinary UTF-8 Markdown under `~/.agentpost`.
 - Reading is non-destructive. Claiming atomically moves one letter to `read/`.
+- Replying atomically claims an exact unread original; already-read originals
+  remain replyable for corrections.
 - Notifications are pointers. The mailbox is always the durable truth.
 - Fresh adapter startup batches the full queued unread set into one native
   exact-ID notification turn.
@@ -96,7 +98,7 @@ AgentPost needs Python 3.11+. The Codex real-time adapter also needs Node.js 22+
 ### Installer behavior
 
 The one-line installer is idempotent. The published script and its default
-source are pinned to `v1.0.0`; `AGENTPOST_SOURCE` is the explicit development
+source are pinned to `v1.1.0`; `AGENTPOST_SOURCE` is the explicit development
 or mirror override. It upgrades the dedicated environment
 under `~/.local/share/agentpost`, preserves `~/.agentpost`, links the command
 into `~/.local/bin`, and migrates unambiguous v1 identity metadata.
@@ -251,6 +253,14 @@ agentpost message engineer 'Please review the storage notes.' --notify idle
 agentpost question writer 'Does this wording change the contract?' \
   --notify immediate
 
+# Repository reviews fail closed unless the immutable artifact resolves.
+commit=$(git rev-parse HEAD)
+parent=$(git rev-parse HEAD^)
+agentpost review reviewer 'Check reply concurrency and regression coverage.' \
+  --repo "$PWD" --commit "$commit" --parent "$parent" \
+  --path src/agentpost/core.py \
+  --test tests/test_core.py::PostOfficeTest::test_reply_correlates_to_original
+
 # Ask a registered group and inspect its derived response panel.
 agentpost group-set reviewers 'writer,engineer'
 agentpost question reviewers 'Review section 4.' --notify idle
@@ -263,14 +273,23 @@ agentpost next writer --message-id '<message-id>'
 agentpost reply '<message-id>' 'Reviewed; one ambiguity remains.'
 ```
 
-`message` and `question` are the normal human-facing channel commands. The
-lower-level `send` and `ask` forms remain for scripts that already hold
+`message` and `question` are the normal general-purpose channel commands.
+`review` is the repository-specific question form: it requires a Git worktree,
+an explicit full commit SHA, one or more commit-tree paths, and one or more
+file-qualified test nodes. An optional `--parent` must be a direct parent. It
+rejects unresolved shell or placeholder syntax, prints the complete generated
+artifact block, and writes no recipient or sender copy if preflight fails.
+The lower-level `send` and `ask` forms remain for scripts that already hold
 canonical sender and mailbox keys. Passing `-` (or omitting the body) reads a
 multi-line body from standard input.
 
 Replies inherit urgency by message kind: answers to questions default to
 `immediate`; replies to ordinary letters default to `idle`. `--notify` remains
-an explicit override.
+an explicit override. A successful reply claims an unread original as part of
+the same operation. Validation failures leave it unread; a delivery error after
+claim leaves it read because recipient delivery may already have committed.
+Retry that case as a correction against the already-read original rather than
+requeueing it and risking a duplicate response.
 
 ## How waiting works
 

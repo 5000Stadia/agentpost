@@ -20,6 +20,7 @@ from .panels import ask, panel_status, wait_for_panel
 from .adapters import MailboxWatcher
 from .installer import armed, doctor, install, uninstall
 from .presence import agent_presence
+from .review import prepare_review, render_review_request
 from .native import (
     acknowledge_notifications,
     antigravity_hook,
@@ -200,6 +201,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     channel_question.add_argument("--wait", type=float)
     channel_question.add_argument("--quorum", type=int)
+
+    review = commands.add_parser(
+        "review",
+        description="Validate and send an immutable repository review request.",
+    )
+    review.add_argument("recipient")
+    review.add_argument("body", nargs="?")
+    review.add_argument("--from", dest="sender")
+    review.add_argument("--repo", type=Path, required=True)
+    review.add_argument("--commit", required=True)
+    review.add_argument("--parent")
+    review.add_argument("--path", dest="paths", action="append", required=True)
+    review.add_argument("--test", dest="tests", action="append", required=True)
+    review.add_argument("--subject")
+    review.add_argument(
+        "--notify", choices=("idle", "immediate"), default="immediate"
+    )
 
     renotify = commands.add_parser("notify")
     renotify.add_argument("recipient")
@@ -499,6 +517,35 @@ def main(argv: list[str] | None = None) -> int:
                 _print_panel(status)
                 if not status.complete:
                     return 2
+        elif args.command == "review":
+            sender = _channel_sender(office, args.sender)
+            recipients = resolve_channel_recipients(
+                office,
+                (args.recipient,),
+                sender=sender,
+            )
+            artifact = prepare_review(
+                args.repo,
+                args.commit,
+                args.paths,
+                args.tests,
+                parent=args.parent,
+            )
+            rendered = render_review_request(artifact, _channel_body(args.body))
+            print("REVIEW-ENVELOPE-BEGIN")
+            print(rendered)
+            print("REVIEW-ENVELOPE-END", flush=True)
+            result = office.send_many(
+                sender,
+                recipients,
+                rendered,
+                subject=args.subject or f"Review {artifact.commit[:12]}",
+                kind="question",
+                notify=args.notify,
+                review=artifact,
+            )
+            _print_channel_delivery(office, sender, recipients, result)
+            _warn_unarmed(office, recipients)
         elif args.command == "notify":
             sender = _channel_sender(office, args.sender)
             recipient = resolve_identity(office, args.recipient).name
@@ -554,17 +601,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
         elif args.command == "reply":
             replier, message_id, body = _reply_parts(office, args.parts, args.sender)
-            original = office.read(replier, message_id).letter
-            recipient = original.from_agent
-            notify = args.notify or (
-                "immediate" if original.kind == "question" else "idle"
-            )
             result = office.reply(
                 replier,
                 message_id,
                 _channel_body(body),
-                notify=notify,
+                notify=args.notify,
             )
+            recipient = office.read(
+                replier, message_id, states=("read",)
+            ).letter.from_agent
             print(result.message_id)
             _warn_unarmed(office, (recipient,))
         elif args.command == "internal-claude-boundary":
@@ -641,7 +686,7 @@ def _parse_args(
     parser: argparse.ArgumentParser, argv: list[str] | None
 ) -> argparse.Namespace:
     args, extras = parser.parse_known_args(argv)
-    supports_optional_body = args.command in {"message", "question"}
+    supports_optional_body = args.command in {"message", "question", "review"}
     if (
         supports_optional_body
         and args.body is None

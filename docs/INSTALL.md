@@ -17,13 +17,13 @@ scheduled. See [the roadmap](../ROADMAP.md) for remaining live-wake work.
 The shortest install or upgrade is one line:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.0.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.1.0/scripts/install.sh | sh
 ```
 
 The script creates a dedicated virtual environment under
 `~/.local/share/agentpost`, links `agentpost` into `~/.local/bin`, and runs
 idempotent initialization. The published script and default package source are
-pinned to `v1.0.0`; set `AGENTPOST_SOURCE` only when deliberately installing a
+pinned to `v1.1.0`; set `AGENTPOST_SOURCE` only when deliberately installing a
 development checkout or controlled mirror. Installation does not delete or
 replace `~/.agentpost`, and migration tightens existing AgentPost runtime
 permissions without changing mailbox contents.
@@ -55,7 +55,7 @@ The equivalent manual commands are:
 ```sh
 python3 -m venv ~/.local/share/agentpost/venv
 ~/.local/share/agentpost/venv/bin/pip install \
-  git+https://github.com/5000Stadia/agentpost.git@v1.0.0
+  git+https://github.com/5000Stadia/agentpost.git@v1.1.0
 mkdir -p ~/.local/bin
 ln -sf ~/.local/share/agentpost/venv/bin/agentpost ~/.local/bin/agentpost
 agentpost init

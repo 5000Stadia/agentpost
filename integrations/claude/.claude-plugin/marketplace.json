@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Local AgentPost development marketplace",
-    "version": "0.0.6"
+    "version": "0.0.7"
   },
   "plugins": [
     {
       "name": "agentpost",
       "description": "A named local communication channel for CLI agents",
-      "version": "0.0.6",
+      "version": "0.0.7",
       "author": {
         "name": "AgentPost contributors"
       },

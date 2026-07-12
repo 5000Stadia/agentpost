@@ -1,18 +1,18 @@
 # AgentPost Implementation Status
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 ## Current phase
 
 The prior-art gate selected an independent literal-filesystem semantic core.
 The measured agmsg comparison and live Claude/Codex evaluation are in
-`PRIOR_ART_EVALUATION.md`. AgentPost 1.0.0 is the first stable release, with its
+`PRIOR_ART_EVALUATION.md`. AgentPost 1.1.0 is the current stable release, with its
 compatibility, security, and release contracts recorded in the repository.
 
 The local four-agent deployment now uses AgentPost as its sole actionable
 development-agent channel. Claude projects K/PB/C have the project-scoped
-`agentpost@agentpost-local` plugin generation 0.0.6; Cx uses Codex plugin
-generation `0.0.4+codex.20260711042958`, and the Python package is at 1.0.0.
+`agentpost@agentpost-local` plugin generation 0.0.7; Cx uses Codex plugin
+generation `0.0.5+codex.20260712082137`, and the Python package is at 1.1.0.
 Plugin generations identify independently deployed adapter artifacts and do
 not replace the Python package's semantic version.
 Codex hook commands are stable across upgrades; a process that predates the
@@ -38,6 +38,11 @@ or the original data directories.
 - Named groups, ad hoc lists, and role/project/specialty selectors.
 - Correlated replies, direct/group questions, panel derivation, quorum,
   timeout, pending/error state, late answers, and duplicate response retention.
+- Atomic claim-on-reply for unread originals, correction replies against read
+  originals, validation-before-claim, and fail-safe ambiguous-delivery behavior.
+- Fail-closed repository review questions with canonical machine-readable
+  commit metadata, direct-parent checks, commit-tree paths, file-qualified
+  tests, generated artifact rendering, and CLI/Python channel parity.
 - CLI smoke coverage for discovery, group ask/reply, and panel rendering.
 - Bell-adapter interface, deterministic fake, and token-free mailbox watcher.
 - Claude Code marketplace plugin with a live monitor, exact catch-up,
@@ -115,7 +120,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 155 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 167 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 

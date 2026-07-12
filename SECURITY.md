@@ -40,7 +40,7 @@ operation are outside the 1.x security boundary.
 ## Installation trust
 
 Published installation examples fetch `scripts/install.sh` from the versioned
-`v1.0.0` tag, and that script installs the same tagged source by default. Review
+`v1.1.0` tag, and that script installs the same tagged source by default. Review
 the script and release tag before piping it to a shell when your environment
 requires a stronger supply-chain policy. `AGENTPOST_SOURCE` intentionally
 overrides the source pin for development or controlled mirrors; the caller is

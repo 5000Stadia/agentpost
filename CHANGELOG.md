@@ -3,6 +3,32 @@
 AgentPost follows [Semantic Versioning](https://semver.org/). The supported
 compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
+## [1.1.0] - 2026-07-12
+
+### Added
+
+- `agentpost review` and `AgentChannel.review()` validate immutable repository
+  review artifacts before delivery. They require a canonical full commit SHA,
+  verified paths and file-qualified tests, and optionally a direct parent.
+- Review letters carry machine-readable artifact headers and a generated
+  Markdown block that is rendered to the sender before mailbox commit.
+
+### Changed
+
+- Replying now atomically claims an exact unread original. Already-read
+  originals remain replyable for corrections, including retry after an
+  ambiguous post-claim delivery error.
+- Reply urgency inference now lives in `PostOffice.reply()`: questions default
+  to immediate and ordinary letters default to idle across CLI and Python use.
+
+### Reliability
+
+- Preflight failures reject unresolved artifacts, non-direct merge parents,
+  missing tree paths, unqualified tests, and shell/placeholder syntax without
+  writing recipient or sender mail.
+- Concurrency coverage pins one winner when competing replies both observed an
+  unread original, while validation failures leave the original retryable.
+
 ## [1.0.0] - 2026-07-11
 
 First stable release.
@@ -40,4 +66,5 @@ First stable release.
 - Published bootstrap commands and the default installer source are pinned to
   the versioned `v1.0.0` release tag.
 
+[1.1.0]: https://github.com/5000Stadia/agentpost/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/5000Stadia/agentpost/releases/tag/v1.0.0

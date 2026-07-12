@@ -176,7 +176,10 @@ The sender is inferred like `message` and `question`. The legacy
 `reply AGENT MESSAGE_ID` form remains accepted for scripts during migration.
 Replies to questions default to immediate notification because an answer is
 awaited; replies to ordinary letters default to idle. Use `--notify` to
-override either case.
+override either case. Reply atomically claims the exact original when it is
+still unread; already-read originals remain replyable for corrections. Claim
+with `next` before substantial work, or let an immediate reply perform that
+transition when composing the response is the work.
 
 If an existing unread letter needs a fresh native notification, the ORIGINAL
 sender may re-notify that exact durable Message-ID without creating a duplicate:
@@ -205,14 +208,27 @@ it into a legacy inbox. A legacy message may contain installation control or a
 pointer to an existing AgentPost Message-ID after a proven notification failure,
 but must not duplicate the work.
 
-Before sending a review request that cites repository artifacts, verify every
-commit exists and inspect the referenced diff. Claims about added or changed
-tests must include exact test node IDs or file-qualified test names when the
-framework supports them. Label any claim that was not directly verified as
-unverified. The receiver treats the repository diff as authoritative rather
-than trusting prose in the request. Do not heuristically infer artifact truth
-from prose; a future automated preflight must consume explicit structured
-commit, path, and test assertions and fail closed when one is absent.
+Send repository review work through the fail-closed review channel:
+
+```sh
+commit=$(git -C REPOSITORY rev-parse HEAD)
+parent=$(git -C REPOSITORY rev-parse HEAD^)
+agentpost review RECIPIENT - --repo REPOSITORY \
+  --commit "$commit" --parent "$parent" \
+  --path src/module.py \
+  --test tests/test_module.py::ModuleTest::test_behavior
+```
+
+Use explicit full commit-object SHAs. Never pass a literal command substitution,
+placeholder, branch, or mutable `HEAD` as a structured value. Repeat `--path`
+and `--test` for the complete assertion set; every test must begin with its
+commit-tree file as `RELATIVE_PATH::TEST_NODE`. `--parent` is optional but, when
+present, must be a direct parent. AgentPost verifies the worktree, artifact,
+paths, and test files, prints the complete generated envelope, and writes no
+mail if preflight fails. Inspect the referenced diff before sending and label
+anything not directly verified as unverified. The receiver treats the immutable
+repository diff and machine-readable review headers as authoritative rather
+than trusting prose.
 
 Legacy cutover is per agent. Migrate a project's durable communication policy
 only after that exact agent has proven inbound receipt/claim and outbound

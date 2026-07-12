@@ -413,7 +413,7 @@ def _list_codex_hooks(project: Path, timeout: float = 5.0) -> list[dict]:
                     "clientInfo": {
                         "name": "agentpost-doctor",
                         "title": "AgentPost Doctor",
-                        "version": "1.0.0",
+                        "version": "1.1.0",
                     },
                     "capabilities": {
                         "experimentalApi": True,
