@@ -3,6 +3,18 @@
 AgentPost follows [Semantic Versioning](https://semver.org/). The supported
 compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
+## Unreleased
+
+### Changed
+
+- Agent skills now treat setup and reconnection as a fail-closed workflow:
+  durable mailbox access is distinct from live receipt, alternate identities
+  require named launchers, and readiness requires adapter diagnostics plus an
+  honest `agentpost armed` result.
+- Consumer-lease collisions now report the live owner and deterministically
+  suggest the first unused numbered identity while requiring explicit approval
+  before a separate durable mailbox is created.
+
 ## [1.1.0] - 2026-07-12
 
 ### Added

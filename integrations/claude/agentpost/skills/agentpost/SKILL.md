@@ -1,6 +1,6 @@
 ---
 name: agentpost
-description: Use AgentPost as the local agent communication channel and address book. Trigger when the user says to send, tell, ask, share, forward, confer, or review with a named local agent, project identity, specialist, or group; when another agent may own relevant context; or when processing AgentPost notifications.
+description: Use AgentPost as the local agent communication channel and address book. Trigger when the user says to send, tell, ask, share, forward, confer, or review with a named local agent, project identity, specialist, or group; when setting up, connecting, reconnecting, or diagnosing an AgentPost mailbox or adapter; when another agent may own relevant context; or when processing AgentPost notifications.
 ---
 
 # AgentPost
@@ -46,6 +46,47 @@ registered root and idempotently handles fresh, existing, or moved integrations;
 `connect` is an alias. Use `agentpost join NAME --cli CURRENT_CLI` only when the
 command reports genuine identity ambiguity. Never create a new mailbox merely
 because a new CLI process opened.
+
+## Connection readiness
+
+When the user asks this running agent to set up, connect, reconnect, or receive
+mail as `NAME`, perform the deterministic recovery rather than merely proving
+that the mailbox can be addressed:
+
+1. Resolve `NAME` and run `agentpost identify --cli CURRENT_CLI --cwd "$PWD"`
+   to compare the requested identity with this process.
+2. Run the applicable idempotent `agentpost join --cli CURRENT_CLI`, using the
+   explicit `NAME` form only for an alternate identity or genuine ambiguity.
+3. Run `agentpost doctor NAME --project "$PWD" --cli CURRENT_CLI` and follow
+   any safe adapter instruction it reports.
+4. Run `agentpost armed NAME` and report its actual result.
+
+Mailbox existence and successful `resolve`, `list`, `read`, `message`, or
+`reply` commands prove durable access only. Never claim that an agent is ready,
+connected, receiving, or reconnected while `armed` reports `QUEUED`, or while
+`doctor` reports a failure that prevents the requested notification mode.
+
+If a connection attempt reports that `NAME` already has an inbound consumer,
+do not steal its lease or silently treat mailbox-level `ARMED` as proof that
+this process connected. Report the existing owner. If it is this managed
+session's parent bridge, continue in the existing session. Otherwise inspect
+the exact identities and offer the user the first unused numbered mailbox,
+starting with `NAME2`, then `NAME3`. Create it only after explicit user approval,
+then use the explicit named join and launcher and verify it independently. The
+numbered identity is a separate durable mailbox: it does not inherit, claim, or
+move mail already addressed to `NAME`.
+
+Do not rewrite integration state ad hoc or launch a nested copy of the current
+CLI. A running process cannot retroactively become an alternate identity that
+requires an explicit named launcher. If repair requires replacing or reloading
+the current process, mark reconnection as pending and give the exact external
+launcher, such as `agentpost codex --agent NAME`, `agentpost claude --agent
+NAME`, or `agentpost antigravity --agent NAME`. The replacement session must
+repeat `doctor` and `armed` before reporting success.
+
+Some adapters honestly provide lifecycle catch-up without already-idle wake.
+For those adapters, describe `QUEUED` as durable mail that will surface at the
+next supported lifecycle boundary; do not describe it as live readiness.
 
 ## Registering a durable nameplate
 

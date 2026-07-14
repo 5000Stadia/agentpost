@@ -160,6 +160,30 @@ agentpost codex --agent reviewer
 The workspace above is a runtime connection, not project ownership on the
 reviewer's directory profile.
 
+Mailbox access and live connection are different states. An agent asked to set
+up or reconnect must run `join`, then verify the requested adapter with
+`doctor` and `armed`; successful address resolution or inbox access alone does
+not mean notifications are live:
+
+```sh
+agentpost doctor reviewer --project "$PWD" --cli codex
+agentpost armed reviewer
+```
+
+Only `ARMED` establishes live receipt. `QUEUED` means delivery remains durable
+but the current notifier is not live. A process opened under the workspace
+default cannot silently adopt an alternate role: close or leave that process,
+launch `agentpost codex --agent reviewer` externally, and verify again. Adapters
+that support lifecycle catch-up but not idle wake remain honestly `QUEUED`
+between lifecycle boundaries.
+
+If a named launcher finds that another process already consumes the mailbox,
+it reports the owner and suggests the first unused numbered identity, such as
+`reviewer2`. The agent must offer that option rather than creating it silently.
+After user approval, the new identity is registered, joined, launched, and
+verified separately. It has its own inbox and does not inherit mail already
+addressed to `reviewer`.
+
 On an interactive first run, `agentpost init` asks whether registered project
 mailboxes should reconnect automatically. `auto` reuses known project roots;
 `manual` requires an explicit `join`/`connect` binding. Neither mode silently

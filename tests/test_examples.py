@@ -667,6 +667,62 @@ class DocumentationExampleTest(unittest.TestCase):
         self.assertIn("PreInvocation", hooks["agentpost"])
         self.assertIn("Stop", hooks["agentpost"])
 
+    def test_shared_skill_fails_closed_on_reconnect_readiness(self) -> None:
+        shared_path = (
+            ROOT / "integrations" / "shared" / "agentpost" / "SKILL.md"
+        )
+        skill = shared_path.read_text(encoding="utf-8")
+
+        self.assertIn("## Connection readiness", skill)
+        self.assertIn("setting up, connecting, reconnecting", skill)
+        self.assertIn("agentpost doctor NAME", skill)
+        self.assertIn("agentpost armed NAME", skill)
+        self.assertIn("prove durable access only", skill)
+        self.assertIn("while `armed` reports `QUEUED`", skill)
+        self.assertIn("offer the user the first unused numbered mailbox", skill)
+        self.assertIn("numbered identity is a separate durable mailbox", skill)
+        self.assertIn("move mail already addressed to `NAME`", skill)
+        self.assertIn("cannot retroactively become an alternate identity", skill)
+        self.assertIn("do not describe it as live readiness", skill)
+
+        generated_paths = (
+            ROOT
+            / "integrations"
+            / "claude"
+            / "agentpost"
+            / "skills"
+            / "agentpost"
+            / "SKILL.md",
+            ROOT
+            / "integrations"
+            / "codex"
+            / "plugins"
+            / "agentpost"
+            / "skills"
+            / "agentpost"
+            / "SKILL.md",
+            ROOT
+            / "integrations"
+            / "antigravity"
+            / "skills"
+            / "agentpost"
+            / "SKILL.md",
+        )
+        for generated_path in generated_paths:
+            self.assertEqual(generated_path.read_text(encoding="utf-8"), skill)
+
+        packaged = json.loads(
+            (ROOT / "src" / "agentpost" / "data" / "integrations.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        for key in (
+            "claude/agentpost/skills/agentpost/SKILL.md",
+            "codex/plugins/agentpost/skills/agentpost/SKILL.md",
+            "antigravity/skills/agentpost/SKILL.md",
+        ):
+            self.assertEqual(packaged[key], skill)
+
     def test_two_agent_quickstart_smoke(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             wrapper = Path(temporary) / "agentpost"

@@ -139,6 +139,7 @@ class AdapterTest(unittest.TestCase):
 
     def test_unrelated_codex_lease_keeps_exclusive_owner_diagnostic(self) -> None:
         office = self.office()
+        office.register_profile(profile("cx2"))
         owner = ConsumerLease(office, "cx", "codex")
         contender = ConsumerLease(office, "cx", "codex")
         owner.require()
@@ -146,7 +147,8 @@ class AdapterTest(unittest.TestCase):
             with patch("agentpost.ownership._is_process_ancestor", return_value=False):
                 with self.assertRaisesRegex(
                     AgentPostError,
-                    "already has an inbound consumer.*instead of launching a nested copy",
+                    "already has an inbound consumer.*instead of launching a nested "
+                    "copy.*ask the user.*`cx3`.*explicit approval",
                 ):
                     contender.require()
         finally:

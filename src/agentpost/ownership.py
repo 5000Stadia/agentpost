@@ -86,8 +86,11 @@ class ConsumerLease:
                     "; if this command is running inside that managed Codex session, "
                     "continue there instead of launching a nested copy"
                 )
+        parallel_name = _next_parallel_name(self.office, self.agent)
         raise AgentPostError(
-            f"mailbox {self.agent} already has an inbound consumer: {detail}"
+            f"mailbox {self.agent} already has an inbound consumer: {detail}; "
+            f"ask the user whether to create a separate identity `{parallel_name}`; "
+            "do not create it without explicit approval"
         )
 
     def release(self) -> None:
@@ -128,6 +131,21 @@ def _atomic_json(path: Path, value: object) -> None:
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def _next_parallel_name(office: PostOffice, name: str) -> str:
+    existing = set()
+    if office.agents_dir.is_dir():
+        existing = {
+            path.name for path in office.agents_dir.iterdir() if path.is_dir()
+        }
+    number = 2
+    while True:
+        suffix = str(number)
+        candidate = f"{name[: 64 - len(suffix)]}{suffix}"
+        if candidate not in existing:
+            return candidate
+        number += 1
 
 
 def _is_process_ancestor(ancestor_pid: object, descendant_pid: int | None = None) -> bool:
