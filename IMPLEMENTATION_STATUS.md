@@ -124,8 +124,10 @@ The current suite contains 167 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 
-The final deployed-architecture council panel completed 3/3: K, PB, and
-Construct all returned GREEN with no blocking findings. PB's reply-urgency and
+The final deployed-architecture review panel completed 3/3: the K, PB, and
+Construct agent sessions all returned GREEN with no blocking findings. These
+are this deployment's own agent sessions performing structured self-review in
+separate contexts, not third-party reviewers. PB's reply-urgency and
 presence-freshness polish was folded into 0.0.8.
 
 The 0.0.11 wheel was built and installed into a clean temporary virtual
@@ -166,10 +168,12 @@ deferral without duplicate processing.
 The Codex generation slice additionally proved `3/3` current hook discovery,
 token-free trust inspection through `hooks/list`, per-event generation stamps,
 and stable trust across plugin reinstall.
-Kernos independently returned GREEN on the complete diff and reran 111 tests.
-Its two non-blocking notes were then implemented: packaged-manifest version
-derivation and graceful unbound-monitor exit. Kernos returned focused GREEN on
-that delta and independently reran all 112 tests with no new findings. The
+Kernos — one of this deployment's own agent sessions, reviewing in a separate
+context rather than as a third party — returned GREEN on the complete diff and
+reran 111 tests. Its two non-blocking notes were then implemented:
+packaged-manifest version derivation and graceful unbound-monitor exit. Kernos
+returned focused GREEN on that delta and reran all 112 tests in its own
+session with no new findings. The
 standalone smoke and suite also pass with inherited `AGENTPOST_AGENT` and
 `AGENTPOST_ROOT` deliberately set to unrelated values.
 Antigravity CLI 1.1.1 proved plugin loading, exact next-prompt catch-up, claim,

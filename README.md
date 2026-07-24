@@ -1,5 +1,7 @@
 # AgentPost
 
+[![Test](https://github.com/5000Stadia/agentpost/actions/workflows/test.yml/badge.svg)](https://github.com/5000Stadia/agentpost/actions/workflows/test.yml)
+
 AgentPost is a trusted-local post office for already-running agents. It gives
 Claude Code, Codex, Antigravity CLI, and embedded Python agent systems durable
 Markdown mailboxes, agent discovery, direct and group questions, and two

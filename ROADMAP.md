@@ -27,8 +27,10 @@ Every required founder-observed and agent-owned closeout item is complete:
    managed Codex attention modes, and Antigravity lifecycle catch-up are
    complete. Evidence: founder checklist sections 2-7 and `d446c48`.
 
-The deployed-architecture and public-documentation council round robin is
-complete: K, PB, and Construct returned 3/3 GREEN with no blocking findings.
+The deployed-architecture and public-documentation review round robin is
+complete: the K, PB, and Construct agent sessions returned 3/3 GREEN with no
+blocking findings. This was structured self-review across the deployment's own
+agent sessions in separate contexts, not third-party review.
 
 AgentPost 1.1.0 adds fail-closed immutable repository-review envelopes and
 closes the answered-but-unread reply lifecycle defect without changing the

@@ -3,8 +3,11 @@
 Last updated: 2026-07-11
 
 This is the single manual release checklist for the local K/PB/C/Cx deployment.
-Automated tests remain the agents' responsibility. Check a manual item only
-after observing its stated result; record Message-IDs for mail-flow evidence.
+K, PB, C, and Cx are this deployment's own agent sessions operated by the
+founder; agent reviews recorded here are structured self-review across those
+sessions in separate contexts, not third-party review. Automated tests remain
+the agents' responsibility. Check a manual item only after observing its stated
+result; record Message-IDs for mail-flow evidence.
 
 ## Automated evidence already complete
 
@@ -28,9 +31,9 @@ after observing its stated result; record Message-IDs for mail-flow evidence.
   one turn, then re-notifies an already-known unread ID through `turn/steer`
   without copying or claiming the letter; the disposable attention request is
   acknowledged after surfacing.
-- [x] Kernos independently returned full-diff GREEN, then focused GREEN after
-  both review notes were implemented; its final independent run passed all 112
-  tests.
+- [x] Kernos, reviewing in a separate agent session of this same deployment,
+  returned full-diff GREEN, then focused GREEN after both review notes were
+  implemented; its final separate-session run passed all 112 tests.
 - [x] Automated cold-start coverage queues mail with zero consumers, rotates
   K, PB, C, and Cx through every first-member position, permits all four
   mailbox-local leases concurrently, and verifies non-claiming catch-up.
@@ -68,14 +71,14 @@ past the former `unobserved` precondition: all three current-generation events
 had executed.
 
 - [x] End the old remote Codex process and reconnect Cx from
-  `/home/k/agentpost`.
+  `~/agentpost`.
 - [x] Confirm exactly three enabled AgentPost hooks are trusted:
   `SessionStart`, `UserPromptSubmit`, and `Stop`.
 - [x] Submit one ordinary prompt and allow the response to complete.
 - [x] Run:
 
   ```sh
-  agentpost doctor cx --project /home/k/agentpost --cli codex
+  agentpost doctor cx --project ~/agentpost --cli codex
   ```
 
   Pass: every check reports `PASS`, and `codex-generation` says all three hooks
@@ -128,7 +131,7 @@ Fresh-load evidence differs by runtime:
 | Antigravity | Current plugin injects queued IDs at the first `PreInvocation`; already-idle wake is not claimed. |
 | Embedded Python | Runtime starts its watcher; its host scheduler supplies the turn boundary and wake policy. |
 
-Launch from `/home/k/agentpost`:
+Launch from `~/agentpost`:
 
 ```sh
 agentpost codex --agent cx
@@ -169,9 +172,9 @@ appeared in one post-completion `turn-start-request`; correlated answer
 For each agent, reload its project session and run its doctor command:
 
 ```sh
-agentpost doctor k  --project /home/k/Kernos         --cli claude
-agentpost doctor pb --project /home/k/pattern-buffer --cli claude
-agentpost doctor c  --project /home/k/Newproject     --cli claude
+agentpost doctor k  --project ~/Kernos         --cli claude
+agentpost doctor pb --project ~/pattern-buffer --cli claude
+agentpost doctor c  --project ~/Newproject     --cli claude
 ```
 
 - [x] All three doctors pass identity, mailbox, project, and current 0.0.5
