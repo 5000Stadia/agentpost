@@ -271,6 +271,21 @@ project using the same explicit-process/workspace resolution as `identify`.
 The explicit `AGENT --project PATH --cli CLI` form remains available for
 diagnosing another workspace.
 
+Every doctor run includes a `send-path` check. Registration verifies a mailbox
+once and nothing re-checked it afterwards, so a mailbox could keep receiving and
+claiming mail long after it lost the ability to reply — and doctor still passed
+every check. `send-path` drives the same primitives a real send uses: the
+delivery lock, atomic publish into `sent` and `unread`, letter serialization,
+and the notification queue. It commits no letter, is invisible to `list` and
+`next` while it runs, and removes every artifact it creates.
+
+Read its scope precisely. A `PASS` means the post office can deliver; it does
+not mean the caller is permitted to ask. Doctor already runs as an approved
+subprocess, so a host CLI permission layer that blocks `agentpost message` or
+`agentpost reply` stops the command before this check executes. If sends are
+denied while `send-path` passes, the denial is in the host CLI's permission
+configuration, not in AgentPost.
+
 On managed startup, all queued unread Message-IDs are named together in the
 first native notification turn. To re-fire attention for one existing unread
 letter without duplicating it, its sender runs:

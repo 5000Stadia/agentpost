@@ -605,6 +605,55 @@ class PostOfficeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.office.register_profile(invalid)
 
+    def test_verify_send_path_passes_on_a_healthy_mailbox(self) -> None:
+        detail = self.office.verify_send_path("cx")
+        self.assertIn("delivery lock", detail)
+
+    def test_verify_send_path_leaves_no_artifacts_behind(self) -> None:
+        agent_dir = self.root / "agents" / "cx"
+        before = {
+            name: sorted(p.name for p in (agent_dir / name).iterdir())
+            for name in ("tmp", "unread", "read", "sent", "adapter")
+        }
+        self.office.verify_send_path("cx")
+        after = {
+            name: sorted(p.name for p in (agent_dir / name).iterdir())
+            for name in ("tmp", "unread", "read", "sent", "adapter")
+        }
+        # The notification queue is created on demand, exactly as
+        # request_notification creates it; nothing else may change.
+        before["adapter"] = sorted({*before["adapter"], "notifications"})
+        self.assertEqual(after, before)
+        self.assertEqual(self.office.list_messages("cx"), ())
+        self.assertEqual(self.office.list_messages("cx", "sent"), ())
+
+    def test_verify_send_path_detects_an_unwritable_sent_archive(self) -> None:
+        sent = self.root / "agents" / "cx" / "sent"
+        sent.chmod(0o500)
+        try:
+            with self.assertRaises(AgentPostError) as caught:
+                self.office.verify_send_path("cx")
+        finally:
+            sent.chmod(0o700)
+        self.assertIn("send path broken", str(caught.exception))
+
+    def test_verify_send_path_detects_a_missing_mailbox_directory(self) -> None:
+        (self.root / "agents" / "cx" / "tmp").rmdir()
+        with self.assertRaises(AgentPostError) as caught:
+            self.office.verify_send_path("cx")
+        self.assertIn("missing mailbox directory: tmp", str(caught.exception))
+
+    def test_verify_send_path_rejects_an_unknown_agent(self) -> None:
+        with self.assertRaises(UnknownAgentError):
+            self.office.verify_send_path("nobody")
+
+    def test_verify_send_path_does_not_disturb_existing_mail(self) -> None:
+        delivered = self.office.send("k", "cx", "keep me")
+        self.office.verify_send_path("cx")
+        record = self.office.read("cx", delivered.message_id)
+        self.assertEqual(record.letter.body, "keep me")
+        self.assertEqual(len(self.office.list_messages("cx")), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

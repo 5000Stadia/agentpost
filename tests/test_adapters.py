@@ -1751,5 +1751,42 @@ lease.release()
         self.assertTrue(identity.ok)
         self.assertEqual(identity.detail, "resolved second")
 
+    def _antigravity_checks(self, office, agent, project):
+        with patch("agentpost.installer._doctor_antigravity", return_value=()):
+            return doctor(office, agent, project, cli="antigravity")
+
+    def _bound_antigravity_project(self, office, agent: str) -> Path:
+        project = Path(self.temp.name) / f"{agent}-project"
+        project.mkdir(exist_ok=True)
+        office.bind_agent(agent, "antigravity", project)
+        return project
+
+    def test_doctor_reports_send_path_health(self) -> None:
+        office = self.office()
+        project = self._bound_antigravity_project(office, "cx")
+        checks = self._antigravity_checks(office, "cx", project)
+        send_path = next(check for check in checks if check.name == "send-path")
+        self.assertTrue(send_path.ok)
+        self.assertIn("host CLI permission not covered", send_path.detail)
+
+    def test_doctor_fails_when_a_receivable_mailbox_cannot_send(self) -> None:
+        office = self.office()
+        project = self._bound_antigravity_project(office, "cx")
+        # The reported false all-clear: mail still arrives and can be claimed,
+        # but the outbound archive is unwritable, so replying is impossible.
+        office.send("k", "cx", "still receivable")
+        sent = self.root / "agents" / "cx" / "sent"
+        sent.chmod(0o500)
+        try:
+            checks = self._antigravity_checks(office, "cx", project)
+        finally:
+            sent.chmod(0o700)
+        self.assertEqual(len(office.list_messages("cx")), 1)
+        self.assertTrue(all(c.ok for c in checks if c.name != "send-path"))
+        send_path = next(check for check in checks if check.name == "send-path")
+        self.assertFalse(send_path.ok)
+        self.assertFalse(all(check.ok for check in checks))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -771,7 +771,15 @@ Every installer must:
 
 Static doctor checks package visibility, version, paths, identity binding,
 bell or socket availability, hook trust where observable, runtime-directory
-writability, and unread catch-up. A live doctor sends one uniquely identified
+writability, and unread catch-up. Writability is proven by exercising the
+outbound send machinery itself — delivery lock, atomic publish into `sent` and
+`unread`, letter serialization, notification queue — because a mailbox that
+still receives and claims mail may have lost the ability to reply, and every
+other static check passes in that state. The probe commits no letter and
+removes its artifacts. It cannot observe the host CLI's permission layer:
+doctor runs as an already-approved subprocess, so a CLI that denies
+`agentpost message` denies it before any check executes, and the result must
+say so rather than imply end-to-end send works. A live doctor sends one uniquely identified
 AgentPost test letter through only the new channel and verifies the relevant
 native wake and completion edges. Capability degradation is a reported result,
 not an installation failure when the user explicitly chose a reduced profile.

@@ -223,6 +223,7 @@ def doctor(
         (
             Check("mailbox", (office.root / "agents" / agent / "unread").is_dir(), agent),
             Check("project", project.is_dir(), str(project)),
+            _send_path_check(office, agent),
         )
     )
     adapter_cli = _resolve_adapter_cli(office, profile.name, project, cli, profile.cli)
@@ -243,6 +244,14 @@ def doctor(
     else:
         checks.append(Check("adapter", False, f"unsupported CLI: {adapter_cli}"))
     return tuple(checks)
+
+
+def _send_path_check(office: PostOffice, agent: str) -> Check:
+    try:
+        detail = office.verify_send_path(agent)
+    except (AgentPostError, OSError, ValueError) as exc:
+        return Check("send-path", False, str(exc))
+    return Check("send-path", True, f"{detail}; host CLI permission not covered")
 
 
 def armed(office: PostOffice, agent: str) -> tuple[bool, str]:

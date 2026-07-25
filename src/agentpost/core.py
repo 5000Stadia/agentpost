@@ -958,6 +958,71 @@ class PostOffice:
             source.unlink(missing_ok=True)
             target.unlink(missing_ok=True)
 
+    def verify_send_path(self, agent: str) -> str:
+        """Drive the outbound delivery machinery without committing a letter.
+
+        register_profile verifies a mailbox once and nothing re-checks it after
+        that, so a mailbox can go on receiving and claiming mail long after its
+        send path has broken. This exercises the same primitives send_many uses
+        -- delivery lock, atomic publish into sent and unread, letter round
+        trip, notification queue -- and removes everything it creates.
+
+        A pass means the post office can deliver. It cannot mean the caller is
+        allowed to ask: doctor already runs as an approved subprocess, so a host
+        CLI permission layer that blocks `agentpost message` blocks it before
+        this code is ever reached. Callers must not report this as proof that
+        sending works end to end.
+        """
+        agent_dir = self._require_agent(agent)
+        for directory in MAILBOX_DIRS:
+            if not (agent_dir / directory).is_dir():
+                raise AgentPostError(f"missing mailbox directory: {directory}")
+
+        logical_id = f"<{uuid.uuid4()}@agentpost.local>"
+        letter = Letter(
+            message_id=logical_id,
+            date=_utc_now(),
+            from_agent=agent,
+            to_agent=agent,
+            audience=(agent,),
+            kind="letter",
+            notify="idle",
+            body="agentpost doctor send-path probe",
+        )
+        data = letter.as_bytes()
+        if Letter.from_bytes(data).body != letter.body:
+            raise AgentPostError("letter serialization did not round trip")
+
+        # No .md suffix: pathlib globs match dotfiles, so an extension would
+        # expose the probe to list_messages and claim while it briefly exists.
+        probe = f".send-probe-{uuid.uuid4().hex}"
+        token = _message_token(logical_id)
+        lock_path = agent_dir / "adapter" / f"delivery-{token}.lock"
+        stages = []
+        try:
+            with _exclusive_lock(lock_path):
+                stages.append("lock")
+                for mailbox in ("sent", "unread"):
+                    published = self._publish(agent_dir, mailbox, probe, data)
+                    published.unlink(missing_ok=True)
+                    stages.append(mailbox)
+                queue = agent_dir / "adapter" / "notifications"
+                _private_directory(queue, parents=True)
+                marker = queue / f".notify-probe-{uuid.uuid4().hex}"
+                _atomic_write(marker, b"probe")
+                marker.unlink(missing_ok=True)
+                stages.append("notify-queue")
+        except (AgentPostError, OSError, ValueError) as exc:
+            reached = ", ".join(stages) if stages else "nothing"
+            raise AgentPostError(
+                f"send path broken after {reached}: {exc}"
+            ) from exc
+        finally:
+            lock_path.unlink(missing_ok=True)
+            for mailbox in ("sent", "unread"):
+                (agent_dir / mailbox / probe).unlink(missing_ok=True)
+        return "delivery lock, sent and unread publish, notification queue"
+
 
 def _validate_agent_name(name: str) -> None:
     if not AGENT_NAME_RE.fullmatch(name):

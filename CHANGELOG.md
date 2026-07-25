@@ -5,6 +5,19 @@ compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.m
 
 ## Unreleased
 
+### Added
+
+- `agentpost doctor` now includes a `send-path` check, and `PostOffice`
+  exposes `verify_send_path()` behind it. Registration verified a mailbox
+  once and nothing re-checked it afterwards, so a mailbox that could still
+  receive and claim mail but had lost the ability to reply passed every
+  doctor check. The probe exercises the delivery lock, atomic publish into
+  `sent` and `unread`, letter serialization, and the notification queue,
+  commits no letter, and removes every artifact it creates. Its detail line
+  states what it cannot cover: doctor runs as an already-approved subprocess,
+  so a host CLI permission layer that blocks `agentpost message` or
+  `agentpost reply` is never observable from inside this check.
+
 ### Changed
 
 - Agent skills now treat setup and reconnection as a fail-closed workflow:
