@@ -242,7 +242,17 @@ def build_parser() -> argparse.ArgumentParser:
     claim.add_argument("agent")
     claim.add_argument("--message-id")
 
-    watch = commands.add_parser("watch")
+    watch = commands.add_parser(
+        "watch",
+        description=(
+            "Stream unread pointers for AGENT as a read-only fallback. This "
+            "does not connect the mailbox: it acquires no inbound consumer "
+            "lease, publishes no presence, and injects no native "
+            "notifications. Senders still see AGENT offline while it runs, "
+            "and it stops with the process. It is not a persistent monitor; "
+            "use `agentpost join` or a named launcher for live receipt."
+        ),
+    )
     watch.add_argument("agent")
     watch.add_argument("--interval", type=float, default=1.0)
     watch.add_argument("--once", action="store_true")
@@ -909,14 +919,26 @@ def _infer_join_agent(
 
 
 def _warn_unarmed(office: PostOffice, recipients) -> None:
+    # An unbound profile has no adapter to start, so promising a next adapter
+    # start names a delivery path that does not exist. Bindings are the only
+    # truth here: the presence detail folds profile.cli into its connected
+    # adapters and reports one even when nothing is bound.
+    bound = {binding.agent for binding in office.list_bindings()}
     for recipient in recipients:
         is_armed, detail = armed(office, recipient)
         if not is_armed:
-            disposition = (
-                "recipient offline; queued for its next adapter start"
-                if "no live mailbox consumer" in detail
-                else "live wake unavailable; queued for the next supported boundary"
-            )
+            if "no live mailbox consumer" not in detail:
+                disposition = (
+                    "live wake unavailable; queued for the next supported boundary"
+                )
+            elif recipient in bound:
+                disposition = "recipient offline; queued for its next adapter start"
+            else:
+                disposition = (
+                    "recipient has no connected adapter; mail is durable but "
+                    "nothing will deliver it until the mailbox is connected "
+                    "with agentpost join or started by a named launcher"
+                )
             print(
                 f"agentpost: delivered to {recipient}; {disposition}",
                 file=sys.stderr,

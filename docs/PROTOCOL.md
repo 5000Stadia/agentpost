@@ -114,7 +114,17 @@ remains the final exclusion boundary on that degraded path.
 The low-level `watch` command is intentionally an unleased observer feed: two
 watchers may emit the same pointer. Hosts must treat Message-ID as the
 idempotency key and claim before work; use a native adapter or `AgentRuntime`
-when single-consumer notification ownership is required.
+when single-consumer notification ownership is required. Being unleased also
+means it publishes no presence and injects no native notification, so senders
+still observe the mailbox as offline while a watcher runs. `watch --help`
+states this, because a watcher is easily mistaken for a persistent monitor.
+
+Delivery warnings must not promise a delivery path that does not exist. A
+registered profile with no adapter binding has no next adapter start to wait
+for, and its durable mail stays queued until the mailbox is connected or
+started by a named launcher. Bindings are the discriminator: presence folds the
+profile's own `cli` field into its connected adapters and reports one even when
+nothing is bound.
 
 Directory search and role/project/specialty selectors exclude offline agents by
 default. Exact mailbox names and explicit named groups may target offline

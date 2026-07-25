@@ -215,9 +215,32 @@ class JoinCommandTest(unittest.TestCase):
                     ]
                 )
         self.assertEqual(result, 0)
-        self.assertIn("recipient offline; queued for its next adapter start", errors.getvalue())
+        # pb is registered but never bound, so there is no adapter to start.
+        self.assertIn("recipient has no connected adapter", errors.getvalue())
+        self.assertNotIn("queued for its next adapter start", errors.getvalue())
         self.assertNotIn("notifier not armed", errors.getvalue())
         self.assertNotIn("generation", errors.getvalue().lower())
+
+    def test_offline_delivery_warning_promises_a_start_only_when_bound(self) -> None:
+        self.office.bind_agent("pb", "claude", self.project)
+        output = StringIO()
+        errors = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stdout(output), redirect_stderr(errors):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "message",
+                        "pb",
+                        "Queued message.",
+                    ]
+                )
+        self.assertEqual(result, 0)
+        self.assertIn(
+            "recipient offline; queued for its next adapter start", errors.getvalue()
+        )
+        self.assertNotIn("no connected adapter", errors.getvalue())
 
     def test_optional_channel_bodies_may_follow_flags(self) -> None:
         request = self.office.send("pb", "app", "Please reply.")
@@ -377,6 +400,23 @@ class JoinCommandTest(unittest.TestCase):
             profile.does_not_handle,
             ("product roadmap", "marketing copy"),
         )
+
+    def test_watch_help_states_it_does_not_connect_the_mailbox(self) -> None:
+        output = StringIO()
+        with redirect_stdout(output):
+            with self.assertRaises(SystemExit) as exited:
+                main(["--root", str(self.root), "watch", "--help"])
+        self.assertEqual(exited.exception.code, 0)
+        # argparse wraps the description, so compare against unwrapped text.
+        help_text = " ".join(output.getvalue().lower().split())
+        for phrase in (
+            "read-only",
+            "no inbound consumer lease",
+            "publishes no presence",
+            "injects no native",
+            "not a persistent monitor",
+        ):
+            self.assertIn(phrase, help_text)
 
 
 if __name__ == "__main__":

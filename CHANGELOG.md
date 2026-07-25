@@ -18,6 +18,20 @@ compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.m
   so a host CLI permission layer that blocks `agentpost message` or
   `agentpost reply` is never observable from inside this check.
 
+### Fixed
+
+- Offline delivery warnings no longer promise a next adapter start for a
+  registered profile that has no adapter binding. That mailbox has nothing to
+  start, so the warning now says the mail is durable but undeliverable until
+  the mailbox is connected or started by a named launcher. Bindings are the
+  discriminator, because presence folds the profile's own `cli` field into its
+  connected adapters and reports one even when nothing is bound.
+- `agentpost watch --help` now states that it is a read-only stream which
+  acquires no inbound consumer lease, publishes no presence, injects no native
+  notifications, and stops with the process. The unleased semantics were
+  already specified in `docs/PROTOCOL.md`, but the command itself said
+  nothing, and it reads as a persistent monitor.
+
 ### Changed
 
 - Agent skills now treat setup and reconnection as a fail-closed workflow:
