@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import sys
 import tempfile
 import time
@@ -47,16 +48,19 @@ from agentpost.codex_generation import (  # noqa: E402
 from agentpost.codex_lock import CodexPluginLock  # noqa: E402
 from agentpost.installer import (  # noqa: E402
     CODEX_USER_HOOK_COMMAND,
+    Check,
     _claude_plugin_version,
     _doctor_claude,
     _install_codex_user_hook,
     _integration_source,
+    _package_check,
     _remove_codex_user_hook,
     _trusted_agentpost_hooks,
     armed,
     doctor,
     install,
     uninstall,
+    upgrade,
 )
 from agentpost.presence import agent_presence  # noqa: E402
 from agentpost.ownership import ConsumerLease  # noqa: E402
@@ -1750,6 +1754,121 @@ lease.release()
         identity = next(check for check in checks if check.name == "identity")
         self.assertTrue(identity.ok)
         self.assertEqual(identity.detail, "resolved second")
+
+    def _two_bound_projects(self, office):
+        projects = {}
+        for agent, cli in (("cx", "claude"), ("k", "codex")):
+            root = Path(self.temp.name) / f"{agent}-workspace"
+            root.mkdir(exist_ok=True)
+            office.bind_agent(agent, cli, root)
+            projects[agent] = root.resolve()
+        return projects
+
+    def test_upgrade_dry_run_reports_without_installing(self) -> None:
+        office = self.office()
+        projects = self._two_bound_projects(office)
+        states = {
+            "claude": (Check("claude-plugin", True, "0.0.7"),),
+            "codex": (Check("codex-generation", False, "stale generation"),),
+        }
+        with patch("agentpost.installer.install") as installed:
+            with patch(
+                "agentpost.installer._adapter_checks",
+                side_effect=lambda o, a, p, c: states[c],
+            ):
+                results = upgrade(office, dry_run=True)
+        installed.assert_not_called()
+        by_agent = {item.agent: item for item in results}
+        self.assertEqual(by_agent["cx"].state, "current")
+        self.assertEqual(by_agent["k"].state, "would-upgrade")
+        self.assertEqual(by_agent["cx"].project, str(projects["cx"]))
+
+    def test_upgrade_separates_restart_required_from_already_live(self) -> None:
+        office = self.office()
+        self._two_bound_projects(office)
+        # cx is already current; k is stale before and healthy after.
+        observed = {"k": iter((False, True)), "cx": iter((True, True))}
+
+        def checks(_office, agent, _project, _cli):
+            ok = next(observed[agent])
+            return (Check("plugin", ok, "0.0.7" if ok else "stale 0.0.6"),)
+
+        with patch("agentpost.installer.install"):
+            with patch("agentpost.installer._adapter_checks", side_effect=checks):
+                results = upgrade(office)
+        by_agent = {item.agent: item for item in results}
+        self.assertEqual(by_agent["cx"].state, "current")
+        self.assertIn("no restart required", by_agent["cx"].detail)
+        self.assertEqual(by_agent["k"].state, "upgraded")
+        self.assertIn("restart codex", by_agent["k"].detail)
+
+    def test_upgrade_continues_past_a_blocked_binding(self) -> None:
+        office = self.office()
+        self._two_bound_projects(office)
+
+        def installer(_office, cli, *_args, **_kwargs):
+            if cli == "codex":
+                raise AgentPostError("close all Codex sessions")
+
+        with patch("agentpost.installer.install", side_effect=installer):
+            with patch(
+                "agentpost.installer._adapter_checks",
+                return_value=(Check("plugin", True, "0.0.7"),),
+            ):
+                results = upgrade(office)
+        by_agent = {item.agent: item for item in results}
+        self.assertEqual(by_agent["k"].state, "failed")
+        self.assertIn("close all Codex sessions", by_agent["k"].detail)
+        # The unrelated Claude binding still upgraded.
+        self.assertNotEqual(by_agent["cx"].state, "failed")
+
+    def test_upgrade_filters_by_cli_and_skips_embedded_python(self) -> None:
+        office = self.office()
+        self._two_bound_projects(office)
+        python_root = Path(self.temp.name) / "python-workspace"
+        python_root.mkdir()
+        office.register_profile(
+            Profile(
+                name="embedded",
+                display_name="Embedded",
+                cli="python",
+                kind="project",
+                summary="Embedded runtime",
+                projects=("embedded",),
+            )
+        )
+        office.bind_agent("embedded", "python", python_root)
+        with patch("agentpost.installer.install") as installed:
+            with patch(
+                "agentpost.installer._adapter_checks",
+                return_value=(Check("plugin", True, "0.0.7"),),
+            ):
+                claude_only = upgrade(office, cli="claude", dry_run=True)
+                embedded = upgrade(office, cli="python")
+        self.assertEqual([item.agent for item in claude_only], ["cx"])
+        self.assertEqual([item.state for item in embedded], ["skipped"])
+        installed.assert_not_called()
+
+    def test_package_check_fails_when_running_code_is_not_installed(self) -> None:
+        with patch("importlib.metadata.version", return_value="1.0.0"):
+            stale = _package_check()
+        self.assertFalse(stale.ok)
+        self.assertIn("1.0.0 is installed", stale.detail)
+        import agentpost
+
+        with patch("importlib.metadata.version", return_value=agentpost.__version__):
+            matched = _package_check()
+        self.assertTrue(matched.ok)
+        self.assertEqual(matched.detail, agentpost.__version__)
+
+    def test_package_check_tolerates_an_uninstalled_source_checkout(self) -> None:
+        with patch(
+            "importlib.metadata.version",
+            side_effect=importlib.metadata.PackageNotFoundError("agentpost"),
+        ):
+            check = _package_check()
+        self.assertTrue(check.ok)
+        self.assertIn("source checkout", check.detail)
 
     def _antigravity_checks(self, office, agent, project):
         with patch("agentpost.installer._doctor_antigravity", return_value=()):

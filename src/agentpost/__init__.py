@@ -1,3 +1,5 @@
+__version__ = "1.2.0"
+
 from .core import (
     AgentPostError,
     Binding,
@@ -38,6 +40,7 @@ from .adapters import (
 )
 
 __all__ = [
+    "__version__",
     "AgentPostError",
     "AgentChannel",
     "AgentRuntime",

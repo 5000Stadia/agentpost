@@ -159,6 +159,37 @@ manifest while its three stable dispatcher commands preserve existing trust;
 Antigravity validates and reinstalls its plugin. Mail and workspace identity
 remain untouched. Reload any Codex process that predates a newly added hook.
 
+## Upgrading every adapter at once
+
+Upgrading the Python package and refreshing plugin artifacts are two different
+things. Command paths — `reply`, `message`, `doctor` and the rest — run as fresh
+processes, so they use the new package on their next invocation with no restart
+at all. Only a changed plugin generation costs a restart, because the host CLI
+reads hook and monitor artifacts when a session starts.
+
+`upgrade` refreshes every bound adapter and reports that distinction rather than
+making one upgrade look like a full restart of every agent:
+
+```sh
+agentpost upgrade --dry-run
+agentpost upgrade
+agentpost upgrade --cli codex --confirm-codex-sessions-closed
+```
+
+Each binding reports `current`, `upgraded`, `skipped`, or `failed`, and the
+command names which CLIs to restart. `--dry-run` changes nothing, which is the
+way to see whether a Codex generation change is pending before closing any
+sessions. A failing binding never stops the others: a live Codex session blocks
+only its own bindings while Claude and Antigravity still upgrade. Embedded
+Python bindings are skipped because they have no plugin artifact.
+
+`doctor` reports the running package version alongside plugin generations, so a
+runtime that is several releases behind names its version instead of passing
+silently. That check fails only when the imported code disagrees with the
+installed distribution — a source checkout shadowing the virtual environment, or
+a half-finished upgrade. It does not reach the network and cannot tell you a
+newer release exists.
+
 Moving a project is a new binding, not a mailbox migration. Connect the new
 path, verify it, then remove the old default:
 

@@ -3,6 +3,27 @@
 AgentPost follows [Semantic Versioning](https://semver.org/). The supported
 compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
+## Unreleased
+
+### Added
+
+- `agentpost upgrade` refreshes every bound adapter in one command and reports
+  each binding as `current`, `upgraded`, `skipped`, or `failed`, naming which
+  CLIs need a restart. Upgrading the Python package and refreshing plugin
+  artifacts are separate axes: command paths pick up new package code on their
+  next invocation, so only a changed plugin generation costs a restart, and
+  reporting them apart keeps a package upgrade from looking like a full restart
+  of every agent. One binding's failure never stops the rest, so a live Codex
+  session blocks only its own bindings. `--dry-run` reports what each binding
+  would do without changing anything, and `--cli`/`--project` narrow the set.
+- `agentpost doctor` reports the running package version, and `agentpost`
+  exposes `__version__`. Doctor named plugin generations but never the package,
+  so a runtime could sit releases behind while every check passed and nothing
+  named the number. The check fails only when the imported code disagrees with
+  the installed distribution — a source checkout shadowing the venv, or a
+  half-finished upgrade. It cannot report that a newer release exists; that
+  needs a network call doctor deliberately does not make.
+
 ## [1.2.0] - 2026-07-27
 
 ### Added

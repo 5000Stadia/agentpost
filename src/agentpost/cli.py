@@ -19,7 +19,7 @@ from .routing import (
 )
 from .panels import ask, panel_status, wait_for_panel
 from .adapters import MailboxWatcher
-from .installer import armed, doctor, install, uninstall
+from .installer import armed, doctor, install, uninstall, upgrade
 from .presence import agent_presence
 from .review import prepare_review, render_review_request
 from .native import (
@@ -297,6 +297,30 @@ def build_parser() -> argparse.ArgumentParser:
     install_command.add_argument("--agent", required=True)
     install_command.add_argument("--project", type=Path, required=True)
     install_command.add_argument(
+        "--confirm-codex-sessions-closed",
+        action="store_true",
+        help="confirm all unmanaged Codex sessions are closed before plugin replacement",
+    )
+    upgrade_command = commands.add_parser(
+        "upgrade",
+        description=(
+            "Refresh every bound adapter after a package upgrade and report "
+            "which ones need a restart. Command paths pick up new package code "
+            "on their next invocation; only a changed plugin generation costs a "
+            "restart. A binding that fails does not stop the others, so a live "
+            "Codex session blocks only its own bindings."
+        ),
+    )
+    upgrade_command.add_argument(
+        "--cli", choices=("antigravity", "claude", "codex", "python")
+    )
+    upgrade_command.add_argument("--project", type=Path)
+    upgrade_command.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what each binding would do without changing anything",
+    )
+    upgrade_command.add_argument(
         "--confirm-codex-sessions-closed",
         action="store_true",
         help="confirm all unmanaged Codex sessions are closed before plugin replacement",
@@ -667,6 +691,32 @@ def main(argv: list[str] | None = None) -> int:
                 args.project,
                 confirm_codex_sessions_closed=args.confirm_codex_sessions_closed,
             )
+        elif args.command == "upgrade":
+            results = upgrade(
+                office,
+                cli=args.cli,
+                project=args.project,
+                dry_run=args.dry_run,
+                confirm_codex_sessions_closed=args.confirm_codex_sessions_closed,
+            )
+            if not results:
+                print("agentpost: no adapter bindings match", file=sys.stderr)
+                return 1
+            for item in results:
+                print(
+                    f"{item.state.upper()}\t{item.agent}\t{item.cli}\t"
+                    f"{item.project}\t{item.detail}"
+                )
+            restarts = sorted(
+                {item.cli for item in results if item.state == "upgraded"}
+            )
+            if restarts:
+                print(
+                    f"agentpost: restart {', '.join(restarts)} to load the new "
+                    "plugin generation; package-only changes are already live",
+                    file=sys.stderr,
+                )
+            return 1 if any(item.state == "failed" for item in results) else 0
         elif args.command == "doctor":
             agent = args.agent or identify_agent(
                 office,

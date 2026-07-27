@@ -74,6 +74,12 @@ class DocumentationExampleTest(unittest.TestCase):
             f'"version": "{version}"',
             (ROOT / "src/agentpost/installer.py").read_text(encoding="utf-8"),
         )
+        # doctor compares __version__ against the installed distribution, so a
+        # drifted literal would report a mismatch that does not exist.
+        self.assertIn(
+            f'__version__ = "{version}"',
+            (ROOT / "src/agentpost/__init__.py").read_text(encoding="utf-8"),
+        )
         self.assertIn(
             f'version: "{version}"',
             (ROOT / "src/agentpost/data/codex_bridge.mjs").read_text(

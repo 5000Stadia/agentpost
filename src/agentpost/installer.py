@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import os
 import select
@@ -211,6 +212,7 @@ def doctor(
     checks = [
         Check("runtime", office.root.is_dir(), str(office.root)),
         Check("executable", shutil.which("agentpost") is not None, shutil.which("agentpost") or "not found"),
+        _package_check(),
     ]
     try:
         profile = identify_agent(office, project, cli=cli, agent=agent)
@@ -227,23 +229,62 @@ def doctor(
         )
     )
     adapter_cli = _resolve_adapter_cli(office, profile.name, project, cli, profile.cli)
+    checks.extend(_adapter_checks(office, profile.name, project, adapter_cli))
+    return tuple(checks)
+
+
+def _adapter_checks(
+    office: PostOffice,
+    agent: str,
+    project: Path,
+    adapter_cli: str,
+) -> tuple[Check, ...]:
     if adapter_cli == "claude":
-        checks.extend(_doctor_claude(project))
-    elif adapter_cli == "codex":
-        checks.extend(_doctor_codex(office, profile.name, project))
-    elif adapter_cli == "python":
-        checks.append(
+        return _doctor_claude(project)
+    if adapter_cli == "codex":
+        return _doctor_codex(office, agent, project)
+    if adapter_cli == "python":
+        return (
             Check(
                 "python-api",
                 True,
                 "embed agentpost.AgentRuntime and route notifications to the host scheduler",
-            )
+            ),
         )
-    elif adapter_cli == "antigravity":
-        checks.extend(_doctor_antigravity(project))
-    else:
-        checks.append(Check("adapter", False, f"unsupported CLI: {adapter_cli}"))
-    return tuple(checks)
+    if adapter_cli == "antigravity":
+        return _doctor_antigravity(project)
+    return (Check("adapter", False, f"unsupported CLI: {adapter_cli}"),)
+
+
+def _package_check() -> Check:
+    """Report the running package version and catch an incoherent install.
+
+    The version itself is the point: doctor reported plugin generations but
+    never the package, so a runtime could sit releases behind while every check
+    passed and nothing named the number. This cannot tell you a newer release
+    exists -- that needs a network doctor deliberately does not do. It fails
+    only when the imported code disagrees with the installed distribution: a
+    source checkout shadowing the venv, or a half-finished upgrade. A normal
+    pip install moves both together, so agreement is the expected case.
+    """
+    from . import __version__
+
+    try:
+        installed = importlib.metadata.version("agentpost")
+    except importlib.metadata.PackageNotFoundError:
+        return Check(
+            "package",
+            True,
+            f"{__version__} (running from a source checkout; no installed distribution)",
+        )
+    if installed != __version__:
+        return Check(
+            "package",
+            False,
+            f"running {__version__} but {installed} is installed; "
+            "reinstall so the executable and the imported package agree",
+        )
+    return Check("package", True, __version__)
 
 
 def _send_path_check(office: PostOffice, agent: str) -> Check:
@@ -252,6 +293,112 @@ def _send_path_check(office: PostOffice, agent: str) -> Check:
     except (AgentPostError, OSError, ValueError) as exc:
         return Check("send-path", False, str(exc))
     return Check("send-path", True, f"{detail}; host CLI permission not covered")
+
+
+@dataclass(frozen=True)
+class UpgradeResult:
+    agent: str
+    cli: str
+    project: str
+    state: str
+    detail: str
+
+
+def upgrade(
+    office: PostOffice,
+    *,
+    cli: str | None = None,
+    project: Path | None = None,
+    dry_run: bool = False,
+    confirm_codex_sessions_closed: bool = False,
+) -> tuple[UpgradeResult, ...]:
+    """Refresh every bound adapter and report which ones need a restart.
+
+    Upgrading the Python package is one axis and refreshing plugin artifacts is
+    another. Command paths pick up new package code on their next invocation,
+    so only a changed plugin generation costs a restart. Reporting those apart
+    is the point: otherwise every upgrade looks like it costs a full restart of
+    every agent.
+
+    One binding's failure never stops the rest. A live Codex session blocks
+    only its own bindings, and the remaining adapters still upgrade.
+    """
+    wanted = project.expanduser().resolve() if project is not None else None
+    targets = sorted(
+        (
+            binding
+            for binding in office.list_bindings()
+            if (cli is None or binding.cli == cli)
+            and (wanted is None or Path(binding.project).expanduser().resolve() == wanted)
+        ),
+        key=lambda binding: (binding.cli, binding.agent, binding.project),
+    )
+    results = []
+    for binding in targets:
+        root = Path(binding.project).expanduser().resolve()
+        before = _adapter_state(office, binding.agent, root, binding.cli)
+        if binding.cli == "python":
+            results.append(
+                UpgradeResult(
+                    binding.agent,
+                    binding.cli,
+                    str(root),
+                    "skipped",
+                    "embedded Python runtime has no plugin artifact to refresh",
+                )
+            )
+            continue
+        if dry_run:
+            results.append(
+                UpgradeResult(
+                    binding.agent,
+                    binding.cli,
+                    str(root),
+                    "current" if before[0] else "would-upgrade",
+                    before[1],
+                )
+            )
+            continue
+        try:
+            install(
+                office,
+                binding.cli,
+                binding.agent,
+                root,
+                confirm_codex_sessions_closed=confirm_codex_sessions_closed,
+            )
+        except (AgentPostError, OSError, ValueError) as exc:
+            results.append(
+                UpgradeResult(binding.agent, binding.cli, str(root), "failed", str(exc))
+            )
+            continue
+        after = _adapter_state(office, binding.agent, root, binding.cli)
+        if before[0] and after[0]:
+            state, detail = "current", f"{after[1]}; no restart required"
+        elif after[0]:
+            state, detail = "upgraded", f"{after[1]}; restart {binding.cli} to load it"
+        else:
+            state, detail = "upgraded", f"{after[1]}; restart {binding.cli}, then re-run doctor"
+        results.append(UpgradeResult(binding.agent, binding.cli, str(root), state, detail))
+    return tuple(results)
+
+
+def _adapter_state(
+    office: PostOffice,
+    agent: str,
+    project: Path,
+    adapter_cli: str,
+) -> tuple[bool, str]:
+    try:
+        checks = _adapter_checks(office, agent, project, adapter_cli)
+    except (AgentPostError, OSError, ValueError) as exc:
+        return False, str(exc)
+    if not checks:
+        return True, "no adapter checks"
+    failed = [check for check in checks if not check.ok]
+    if failed:
+        return False, failed[0].detail
+    return True, checks[0].detail
 
 
 def armed(office: PostOffice, agent: str) -> tuple[bool, str]:

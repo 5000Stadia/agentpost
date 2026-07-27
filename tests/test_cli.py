@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from agentpost import PostOffice, Profile  # noqa: E402
 from agentpost.cli import _infer_join_agent, _join, main  # noqa: E402
+from agentpost.installer import UpgradeResult  # noqa: E402
 
 
 class JoinCommandTest(unittest.TestCase):
@@ -454,6 +455,40 @@ class JoinCommandTest(unittest.TestCase):
                     )
         self.assertEqual(result, 0)
         self.assertIn("@agentpost.local", output.getvalue())
+
+    def test_upgrade_reports_each_binding_and_fails_only_on_failure(self) -> None:
+        self.office.bind_agent("app", "python", self.project)
+        output = StringIO()
+        errors = StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            result = main(["--root", str(self.root), "upgrade", "--dry-run"])
+        self.assertEqual(result, 0)
+        self.assertIn("SKIPPED\tapp\tpython", output.getvalue())
+        self.assertNotIn("restart", errors.getvalue())
+
+    def test_upgrade_names_the_restart_and_exits_nonzero_on_failure(self) -> None:
+        self.office.bind_agent("pb", "claude", self.project)
+        results = (
+            UpgradeResult("pb", "claude", str(self.project), "upgraded", "0.0.7"),
+            UpgradeResult("app", "codex", str(self.project), "failed", "sessions open"),
+        )
+        output = StringIO()
+        errors = StringIO()
+        with patch("agentpost.cli.upgrade", return_value=results):
+            with redirect_stdout(output), redirect_stderr(errors):
+                result = main(["--root", str(self.root), "upgrade"])
+        self.assertEqual(result, 1)
+        self.assertIn("UPGRADED\tpb\tclaude", output.getvalue())
+        self.assertIn("FAILED\tapp\tcodex", output.getvalue())
+        self.assertIn("restart claude", errors.getvalue())
+        self.assertIn("package-only changes are already live", errors.getvalue())
+
+    def test_upgrade_reports_when_no_binding_matches(self) -> None:
+        errors = StringIO()
+        with redirect_stderr(errors):
+            result = main(["--root", str(self.root), "upgrade", "--cli", "codex"])
+        self.assertEqual(result, 1)
+        self.assertIn("no adapter bindings match", errors.getvalue())
 
     def test_watch_help_states_it_does_not_connect_the_mailbox(self) -> None:
         output = StringIO()
