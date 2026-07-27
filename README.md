@@ -21,7 +21,7 @@ as a specialist, or combine those shapes.
 ## Quick Start
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.1.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.2.0/scripts/install.sh | sh
 ```
 ### Get two agents talking
 To the first agent: 
@@ -100,7 +100,7 @@ AgentPost needs Python 3.11+. The Codex real-time adapter also needs Node.js 22+
 ### Installer behavior
 
 The one-line installer is idempotent. The published script and its default
-source are pinned to `v1.1.0`; `AGENTPOST_SOURCE` is the explicit development
+source are pinned to `v1.2.0`; `AGENTPOST_SOURCE` is the explicit development
 or mirror override. It upgrades the dedicated environment
 under `~/.local/share/agentpost`, preserves `~/.agentpost`, links the command
 into `~/.local/bin`, and migrates unambiguous v1 identity metadata.
