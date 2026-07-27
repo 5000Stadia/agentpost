@@ -119,6 +119,14 @@ means it publishes no presence and injects no native notification, so senders
 still observe the mailbox as offline while a watcher runs. `watch --help`
 states this, because a watcher is easily mistaken for a persistent monitor.
 
+A workspace may host several seats. Its marker names the default, and at equal
+path depth that default outranks an adapter binding, so binding an alternate
+seat to the same root does not change inferred identity — only an explicit
+identity does, which is what a managed named launcher supplies through
+`AGENTPOST_AGENT`. Because inference is therefore invisible when it is wrong, a
+mailbox miss reports the acting seat and the rule that selected it rather than
+the searched mailbox alone.
+
 Delivery warnings must not promise a delivery path that does not exist. A
 registered profile with no adapter binding has no next adapter start to wait
 for, and its durable mail stays queued until the mailbox is connected or

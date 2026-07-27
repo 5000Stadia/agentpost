@@ -20,6 +20,13 @@ compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.m
 
 ### Fixed
 
+- A mailbox miss on `agentpost reply` now names the acting seat and the rule
+  that chose it — explicit identity, workspace default, adapter binding, or
+  declared project root. `message not found for pbeo` reported only which
+  mailbox was searched, so acting as the wrong seat in a multi-seat workspace
+  was indistinguishable from the letter being absent or the recipient being
+  unreachable. `routing.identify_agent_source()` exposes the resolution rule;
+  `identify_agent()` is unchanged.
 - Offline delivery warnings no longer promise a next adapter start for a
   registered profile that has no adapter binding. That mailbox has nothing to
   start, so the warning now says the mail is durable but undeliverable until

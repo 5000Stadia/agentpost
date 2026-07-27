@@ -249,6 +249,13 @@ def resolve_group(office: PostOffice, label: str) -> str | None:
     return matches[0] if matches else None
 
 
+IDENTITY_SOURCES = {
+    2: "workspace default",
+    1: "adapter binding",
+    0: "declared project root",
+}
+
+
 def identify_agent(
     office: PostOffice,
     cwd: str | Path,
@@ -256,8 +263,24 @@ def identify_agent(
     cli: str | None = None,
     agent: str | None = None,
 ) -> Profile:
+    return identify_agent_source(office, cwd, cli=cli, agent=agent)[0]
+
+
+def identify_agent_source(
+    office: PostOffice,
+    cwd: str | Path,
+    *,
+    cli: str | None = None,
+    agent: str | None = None,
+) -> tuple[Profile, str]:
+    """Resolve the acting mailbox and name the rule that chose it.
+
+    Callers that only need the mailbox use identify_agent. The rule matters on
+    a mailbox miss: without it, acting as the wrong seat is indistinguishable
+    from the letter being absent.
+    """
     if agent is not None:
-        return office.load_profile(agent)
+        return office.load_profile(agent), "explicit identity"
 
     current = Path(cwd).expanduser().resolve()
     candidates = []
@@ -301,7 +324,7 @@ def identify_agent(
     if len(best) > 1:
         names = ", ".join(profile.name for profile in best)
         raise ValueError(f"ambiguous agent binding for {current}: {names}")
-    return best[0]
+    return best[0], IDENTITY_SOURCES[best_priority]
 
 
 def project_candidates(

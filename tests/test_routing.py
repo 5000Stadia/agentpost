@@ -15,6 +15,9 @@ from agentpost import (  # noqa: E402
     find_agents,
     identify_agent,
     project_candidates,
+)
+from agentpost.routing import (  # noqa: E402
+    identify_agent_source,
     resolve_channel_recipients,
     resolve_identity,
     resolve_recipients,
@@ -289,6 +292,45 @@ class RoutingTest(unittest.TestCase):
             [item.name for item in project_candidates(self.office, nested_root)],
             ["nested_join"],
         )
+
+    def test_identity_source_names_the_rule_that_chose_the_mailbox(self) -> None:
+        workspace = Path(self.temp.name) / "seats"
+        workspace.mkdir()
+        for name in ("seat_default", "seat_alt"):
+            self.office.register_profile(
+                Profile(
+                    name=name,
+                    display_name=name,
+                    cli="codex",
+                    kind="role",
+                    summary=f"Seat {name}",
+                    roles=("review",),
+                )
+            )
+        self.office.bind_agent("seat_default", "codex", workspace)
+        profile, source = identify_agent_source(self.office, workspace)
+        self.assertEqual(profile.name, "seat_default")
+        self.assertEqual(source, "workspace default")
+
+        # An alternate seat bound to the same root must not win: the workspace
+        # marker outranks an equal-depth binding, so only an explicit identity
+        # moves the acting seat.
+        self.office.bind_agent("seat_alt", "codex", workspace)
+        profile, source = identify_agent_source(self.office, workspace)
+        self.assertEqual(profile.name, "seat_default")
+        self.assertEqual(source, "workspace default")
+
+        profile, source = identify_agent_source(
+            self.office, workspace, agent="seat_alt"
+        )
+        self.assertEqual(profile.name, "seat_alt")
+        self.assertEqual(source, "explicit identity")
+
+    def test_identify_agent_still_returns_only_the_profile(self) -> None:
+        root = Path(self.temp.name) / "kernos"
+        root.mkdir()
+        self.office.bind_agent("k", "claude", root)
+        self.assertEqual(identify_agent(self.office, root).name, "k")
 
 
 if __name__ == "__main__":

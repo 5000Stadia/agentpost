@@ -6,10 +6,11 @@ import os
 import sys
 from pathlib import Path
 
-from .core import AgentPostError, PostOffice, Profile
+from .core import AgentPostError, MessageNotFoundError, PostOffice, Profile
 from .routing import (
     find_agents,
     identify_agent,
+    identify_agent_source,
     project_candidates,
     resolve_channel_recipients,
     resolve_group,
@@ -611,15 +612,18 @@ def main(argv: list[str] | None = None) -> int:
                 )
         elif args.command == "reply":
             replier, message_id, body = _reply_parts(office, args.parts, args.sender)
-            result = office.reply(
-                replier,
-                message_id,
-                _channel_body(body),
-                notify=args.notify,
-            )
-            recipient = office.read(
-                replier, message_id, states=("read",)
-            ).letter.from_agent
+            try:
+                result = office.reply(
+                    replier,
+                    message_id,
+                    _channel_body(body),
+                    notify=args.notify,
+                )
+                recipient = office.read(
+                    replier, message_id, states=("read",)
+                ).letter.from_agent
+            except MessageNotFoundError as exc:
+                raise _mailbox_miss(office, replier, args.sender, exc) from exc
             print(result.message_id)
             _warn_unarmed(office, (recipient,))
         elif args.command == "internal-claude-boundary":
@@ -729,6 +733,34 @@ def _print_panel(status) -> None:
     )
     for record in status.duplicates:
         print(f"duplicate\t{record.letter.from_agent}\t{record.letter.message_id}")
+
+
+def _mailbox_miss(
+    office: PostOffice,
+    replier: str,
+    requested: str | None,
+    exc: MessageNotFoundError,
+) -> AgentPostError:
+    """Name the acting seat and the rule that chose it.
+
+    A bare miss reports only which mailbox was searched, which reads as the
+    letter being absent or the recipient unreachable. Acting as the wrong seat
+    is the likelier cause whenever the sender was inferred rather than stated.
+    """
+    if requested is not None:
+        source = "explicit --from"
+    elif os.environ.get("AGENTPOST_AGENT"):
+        source = "explicit AGENTPOST_AGENT"
+    else:
+        try:
+            source = identify_agent_source(office, Path.cwd())[1]
+        except (AgentPostError, ValueError):
+            source = "inferred identity"
+    return AgentPostError(
+        f"{exc}; this command acted as {replier} by {source}. If the letter "
+        f"was addressed to a different seat in this workspace, run it from "
+        f"that seat's managed launcher or pass --from NAME."
+    )
 
 
 def _channel_sender(office: PostOffice, requested: str | None) -> str:

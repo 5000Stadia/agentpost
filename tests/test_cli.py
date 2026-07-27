@@ -401,6 +401,60 @@ class JoinCommandTest(unittest.TestCase):
             ("product roadmap", "marketing copy"),
         )
 
+    def _alternate_seat_letter(self) -> str:
+        """A workspace whose default seat is not the addressed seat."""
+        self.office.register_profile(
+            Profile(
+                name="alt",
+                display_name="Alternate Seat",
+                cli="codex",
+                kind="role",
+                summary="Alternate review seat in the same workspace",
+                roles=("review",),
+            )
+        )
+        self.office.bind_agent("app", "python", self.project)
+        return self.office.send("pb", "alt", "Addressed to the alt seat.").message_id
+
+    def test_mailbox_miss_names_the_acting_seat_and_the_rule(self) -> None:
+        message_id = self._alternate_seat_letter()
+        errors = StringIO()
+        with patch("pathlib.Path.cwd", return_value=self.project):
+            with redirect_stderr(errors):
+                result = main(
+                    ["--root", str(self.root), "reply", message_id, "an answer"]
+                )
+        self.assertEqual(result, 1)
+        text = errors.getvalue()
+        self.assertIn("acted as app by workspace default", text)
+        self.assertIn("--from NAME", text)
+        # The bare mailbox-miss wording must survive for anyone matching on it.
+        self.assertIn("message not found for app", text)
+
+    def test_mailbox_miss_reports_an_explicit_identity_as_explicit(self) -> None:
+        message_id = self._alternate_seat_letter()
+        errors = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with patch("pathlib.Path.cwd", return_value=self.project):
+                with redirect_stderr(errors):
+                    result = main(
+                        ["--root", str(self.root), "reply", message_id, "an answer"]
+                    )
+        self.assertEqual(result, 1)
+        self.assertIn("acted as app by explicit AGENTPOST_AGENT", errors.getvalue())
+
+    def test_addressed_seat_replies_without_from(self) -> None:
+        message_id = self._alternate_seat_letter()
+        output = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "alt"}, clear=False):
+            with patch("pathlib.Path.cwd", return_value=self.project):
+                with redirect_stdout(output), redirect_stderr(StringIO()):
+                    result = main(
+                        ["--root", str(self.root), "reply", message_id, "an answer"]
+                    )
+        self.assertEqual(result, 0)
+        self.assertIn("@agentpost.local", output.getvalue())
+
     def test_watch_help_states_it_does_not_connect_the_mailbox(self) -> None:
         output = StringIO()
         with redirect_stdout(output):
