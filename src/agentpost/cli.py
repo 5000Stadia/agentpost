@@ -16,6 +16,7 @@ from .routing import (
     resolve_group,
     resolve_identity,
     resolve_recipients,
+    workspace_seats,
 )
 from .panels import ask, panel_status, wait_for_panel
 from .adapters import MailboxWatcher
@@ -803,7 +804,9 @@ def _mailbox_miss(
         source = "explicit AGENTPOST_AGENT"
     else:
         try:
-            source = identify_agent_source(office, Path.cwd())[1]
+            identified, source = identify_agent_source(office, Path.cwd())
+            if identified.name != replier:
+                source = "holding the letter in this workspace"
         except (AgentPostError, ValueError):
             source = "inferred identity"
     return AgentPostError(
@@ -849,7 +852,42 @@ def _reply_parts(
     if len(parts) not in {1, 2}:
         raise ValueError("reply syntax is MESSAGE_ID [BODY]")
     sender = _channel_sender(office, requested_sender)
+    if requested_sender is None and not os.environ.get("AGENTPOST_AGENT"):
+        sender = _reply_seat(office, sender, parts[0])
     return sender, parts[0], parts[1] if len(parts) == 2 else None
+
+
+def _reply_seat(office: PostOffice, inferred: str, message_id: str) -> str:
+    """Answer from the seat that actually holds the letter.
+
+    Workspace inference names one default mailbox, but a notification may be
+    addressed to an alternate seat sharing the project root. Searching only
+    the default reports such a letter as missing, when the real condition is
+    that the runtime is answering from the wrong seat. Holding the letter is
+    the deterministic signal; inference stays the tiebreak.
+    """
+    if _holds_letter(office, inferred, message_id):
+        return inferred
+    holders = [
+        name
+        for name in workspace_seats(office, Path.cwd())
+        if name != inferred and _holds_letter(office, name, message_id)
+    ]
+    if len(holders) > 1:
+        names = ", ".join(sorted(holders))
+        raise AgentPostError(
+            f"{message_id} is addressed to more than one seat in this "
+            f"workspace: {names}; pass --from NAME to choose the sender"
+        )
+    return holders[0] if holders else inferred
+
+
+def _holds_letter(office: PostOffice, agent: str, message_id: str) -> bool:
+    try:
+        office.read(agent, message_id)
+    except (AgentPostError, ValueError):
+        return False
+    return True
 
 
 def _print_resolution(office: PostOffice, label: str) -> None:

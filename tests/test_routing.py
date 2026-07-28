@@ -21,6 +21,7 @@ from agentpost.routing import (  # noqa: E402
     resolve_channel_recipients,
     resolve_identity,
     resolve_recipients,
+    workspace_seats,
 )
 
 
@@ -325,6 +326,42 @@ class RoutingTest(unittest.TestCase):
         )
         self.assertEqual(profile.name, "seat_alt")
         self.assertEqual(source, "explicit identity")
+
+    def test_workspace_seats_names_every_mailbox_reachable_here(self) -> None:
+        workspace = Path(self.temp.name) / "reachable"
+        workspace.mkdir()
+        for name in ("seat_default", "seat_alt"):
+            self.office.register_profile(
+                Profile(
+                    name=name,
+                    display_name=name,
+                    cli="codex",
+                    kind="role",
+                    summary=f"Seat {name}",
+                    roles=("review",),
+                )
+            )
+        self.office.register_profile(
+            Profile(
+                name="seat_root",
+                display_name="seat_root",
+                cli="codex",
+                kind="role",
+                summary="Seat declaring the project root without a binding",
+                roles=("review",),
+                project_roots=(str(workspace),),
+            )
+        )
+        self.office.bind_agent("seat_default", "codex", workspace)
+        self.office.bind_agent("seat_alt", "codex", workspace)
+        seats = workspace_seats(self.office, workspace)
+        self.assertEqual(
+            sorted(seats), ["seat_alt", "seat_default", "seat_root"]
+        )
+        # identify_agent still collapses the same set to one acting seat.
+        self.assertEqual(identify_agent(self.office, workspace).name, "seat_default")
+        # A mailbox with no claim on this directory is not reachable from it.
+        self.assertNotIn("k", seats)
 
     def test_identify_agent_still_returns_only_the_profile(self) -> None:
         root = Path(self.temp.name) / "kernos"

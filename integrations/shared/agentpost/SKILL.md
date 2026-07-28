@@ -213,7 +213,13 @@ Reply against the original Message-ID:
 agentpost reply MESSAGE_ID 'answer'
 ```
 
-The sender is inferred like `message` and `question`. The legacy
+The sender is inferred like `message` and `question`, with one addition: when
+the sender is inferred rather than stated, reply answers from whichever mailbox
+reachable in this workspace actually holds that Message-ID. A workspace default
+seat and an alternate seat sharing the project root are both reachable, so a
+runtime notified as the alternate seat can answer its own mail without `--from`.
+The workspace default still wins when it holds a copy, and two alternate seats
+holding the same letter is reported rather than guessed. The legacy
 `reply AGENT MESSAGE_ID` form remains accepted for scripts during migration.
 Replies to questions default to immediate notification because an answer is
 awaited; replies to ordinary letters default to idle. Use `--notify` to

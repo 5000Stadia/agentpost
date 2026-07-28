@@ -456,6 +456,111 @@ class JoinCommandTest(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertIn("@agentpost.local", output.getvalue())
 
+    def _reviewer_seat_letter(self) -> str:
+        """A registered alternate seat sharing the workspace project root."""
+        self.office.register_profile(
+            Profile(
+                name="review",
+                display_name="Application Reviewer",
+                cli="codex",
+                kind="role",
+                summary="Review seat sharing the application project root",
+                roles=("review",),
+                project_roots=(str(self.project),),
+            )
+        )
+        self.office.bind_agent("app", "python", self.project)
+        return self.office.send(
+            "pb", "review", "Addressed to the review seat."
+        ).message_id
+
+    def test_reply_answers_from_the_seat_holding_the_letter(self) -> None:
+        message_id = self._reviewer_seat_letter()
+        with patch("pathlib.Path.cwd", return_value=self.project):
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = main(
+                    ["--root", str(self.root), "reply", message_id, "an answer"]
+                )
+        self.assertEqual(result, 0)
+        reply = self.office.list_messages("pb")[0].letter
+        self.assertEqual(reply.from_agent, "review")
+        self.assertEqual(reply.in_reply_to, message_id)
+
+    def test_reply_keeps_the_workspace_default_that_holds_the_letter(self) -> None:
+        self.office.bind_agent("app", "python", self.project)
+        request = self.office.send("pb", "app", "Please review this.")
+        with patch("pathlib.Path.cwd", return_value=self.project):
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "reply",
+                        request.message_id,
+                        "an answer",
+                    ]
+                )
+        self.assertEqual(result, 0)
+        self.assertEqual(self.office.list_messages("pb")[0].letter.from_agent, "app")
+
+    def test_reply_prefers_the_workspace_default_holding_a_shared_letter(self) -> None:
+        self._reviewer_seat_letter()
+        fanout = self.office.send_many("pb", ("app", "review"), "Addressed to both.")
+        with patch("pathlib.Path.cwd", return_value=self.project):
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = main(
+                    ["--root", str(self.root), "reply", fanout.message_id, "an answer"]
+                )
+        # Both seats hold a copy, so inference stays the tiebreak.
+        self.assertEqual(result, 0)
+        self.assertEqual(self.office.list_messages("pb")[0].letter.from_agent, "app")
+
+    def test_reply_refuses_to_guess_between_two_alternate_seats(self) -> None:
+        self._reviewer_seat_letter()
+        self.office.register_profile(
+            Profile(
+                name="audit",
+                display_name="Application Auditor",
+                cli="codex",
+                kind="role",
+                summary="Second alternate seat sharing the project root",
+                roles=("audit",),
+                project_roots=(str(self.project),),
+            )
+        )
+        fanout = self.office.send_many(
+            "pb", ("review", "audit"), "Addressed to both alternates."
+        )
+        errors = StringIO()
+        with patch("pathlib.Path.cwd", return_value=self.project):
+            with redirect_stderr(errors):
+                result = main(
+                    ["--root", str(self.root), "reply", fanout.message_id, "an answer"]
+                )
+        self.assertEqual(result, 1)
+        text = errors.getvalue()
+        self.assertIn("audit, review", text)
+        self.assertIn("--from NAME", text)
+
+    def test_explicit_from_outranks_the_seat_holding_the_letter(self) -> None:
+        message_id = self._reviewer_seat_letter()
+        errors = StringIO()
+        with patch("pathlib.Path.cwd", return_value=self.project):
+            with redirect_stderr(errors):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "reply",
+                        "--from",
+                        "app",
+                        message_id,
+                        "an answer",
+                    ]
+                )
+        self.assertEqual(result, 1)
+        self.assertIn("acted as app by explicit --from", errors.getvalue())
+
     def test_upgrade_reports_each_binding_and_fails_only_on_failure(self) -> None:
         self.office.bind_agent("app", "python", self.project)
         output = StringIO()

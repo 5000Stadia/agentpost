@@ -154,6 +154,15 @@ a known coworker is durable delivery, not availability discovery. Tied matches
 are rejected instead of guessed. The sender is inferred from explicit process
 identity or the deepest current workspace identity source.
 
+A reply by Message-ID narrows an inferred sender further. Among the mailboxes
+reachable from the current directory — the workspace default and its known
+alternates, adapter bindings covering the directory, and profiles declaring it
+as a project root — the one holding that letter acts, so a runtime notified as
+an alternate seat answers its own mail without restating identity. The inferred
+mailbox still wins when it holds a copy, a mailbox with no claim on the
+directory is never reachable, and two reachable alternates holding the same
+letter are reported rather than guessed. An explicit sender is unaffected.
+
 Python applications expose the same presence contract through
 `AgentRuntime`. Its callback/queue receives Message-IDs only and does not alter
 the `unread -> read` lifecycle. Synchronous callback failures are retried in

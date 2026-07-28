@@ -327,6 +327,33 @@ def identify_agent_source(
     return best[0], IDENTITY_SOURCES[best_priority]
 
 
+def workspace_seats(office: PostOffice, cwd: str | Path) -> tuple[str, ...]:
+    """Mailboxes a runtime in this directory may legitimately act as.
+
+    identify_agent collapses this set to a single default. The set itself
+    matters whenever the default is not the seat a letter was addressed to:
+    an alternate seat sharing the project root is reachable from here, while
+    an unrelated mailbox is not.
+    """
+    current = Path(cwd).expanduser().resolve()
+    seats: list[str] = []
+    workspace = office.workspace_identity(current)
+    if workspace is not None:
+        seats.extend(workspace[1])
+    for binding in office.list_bindings():
+        root = Path(binding.project).expanduser().resolve()
+        if current == root or root in current.parents:
+            seats.append(binding.agent)
+    if office.connection_mode() == "auto":
+        for profile in office.list_profiles():
+            for root_value in profile.project_roots:
+                root = Path(root_value).expanduser().resolve()
+                if current == root or root in current.parents:
+                    seats.append(profile.name)
+                    break
+    return tuple(dict.fromkeys(seats))
+
+
 def project_candidates(
     office: PostOffice,
     cwd: str | Path,

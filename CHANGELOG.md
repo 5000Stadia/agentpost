@@ -24,6 +24,22 @@ compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.m
   half-finished upgrade. It cannot report that a newer release exists; that
   needs a network call doctor deliberately does not make.
 
+### Fixed
+
+- `agentpost reply MESSAGE_ID` with an inferred sender now answers from the
+  seat that actually holds the letter, instead of always acting as the single
+  workspace default. A runtime notified as an alternate seat sharing the
+  project root could read and claim its mail but not answer it: inference
+  resolved the workspace default, that mailbox did not hold the letter, and
+  the documented reply workflow failed with `message not found`. Holding the
+  letter is now the deciding signal, and inference is the tiebreak — the
+  workspace default still wins when it holds a copy, and two alternate seats
+  holding the same letter is reported with both names rather than guessed.
+  Explicit `--from`, `AGENTPOST_AGENT`, and single-seat workspaces are
+  unchanged. `routing.workspace_seats()` exposes the mailboxes a runtime in a
+  directory may act as; a letter held by an unrelated mailbox stays out of
+  reach.
+
 ## [1.2.0] - 2026-07-27
 
 ### Added
