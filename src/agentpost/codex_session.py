@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import stat
-import tempfile
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,10 +18,11 @@ from .codex_generation import (
     codex_hook_marker,
 )
 from .core import (
-    PRIVATE_DIRECTORY_MODE,
     PRIVATE_FILE_MODE,
     AgentPostError,
     PostOffice,
+    _open_private_runtime_subdirectory,
+    _read_private_file_at,
 )
 from .ownership import ConsumerLease
 
@@ -75,7 +77,7 @@ def load_codex_session_attachment(
 ) -> CodexSessionAttachment | None:
     path = codex_session_attachment_path(office, session_id)
     try:
-        payload = _read_private_json(path)
+        payload = _read_private_json(office, path)
     except FileNotFoundError:
         return None
     try:
@@ -100,10 +102,68 @@ def load_codex_session_attachment(
     if attachment.session_digest != _session_digest(session_id):
         raise AgentPostError(f"Codex session attachment key mismatch at {path}")
     current_time = time.time() if now is None else now
+    if not all(
+        math.isfinite(value)
+        for value in (
+            attachment.attached_at,
+            attachment.expires_at,
+            current_time,
+        )
+    ):
+        raise AgentPostError(
+            f"non-finite Codex session attachment timestamp at {path}"
+        )
+    if (
+        attachment.attached_at < 0
+        or attachment.expires_at <= attachment.attached_at
+        or not math.isclose(
+            attachment.expires_at - attachment.attached_at,
+            CODEX_SESSION_ATTACHMENT_TTL_SECONDS,
+            rel_tol=0,
+            abs_tol=1e-6,
+        )
+    ):
+        raise AgentPostError(
+            f"incoherent Codex session attachment timestamps at {path}"
+        )
+    if attachment.observed_event not in CODEX_HOOK_EVENTS:
+        raise AgentPostError(
+            f"invalid Codex session attachment event "
+            f"{attachment.observed_event!r} at {path}"
+        )
+    _require_compatible_generation(attachment.observed_generation)
     if attachment.expires_at <= current_time:
-        path.unlink(missing_ok=True)
+        _unlink_attachment(office, path)
         return None
-    office.load_profile(attachment.agent)
+    profile = office.load_profile(attachment.agent)
+    mailbox = office.root / "agents" / profile.name / "unread"
+    try:
+        mailbox_details = mailbox.lstat()
+    except OSError as exc:
+        raise AgentPostError(
+            f"Codex session attachment mailbox is not initialized: "
+            f"{profile.name}"
+        ) from exc
+    if not stat.S_ISDIR(mailbox_details.st_mode):
+        raise AgentPostError(
+            f"Codex session attachment mailbox is not initialized: "
+            f"{profile.name}"
+        )
+    project = Path(attachment.project)
+    if (
+        not project.is_absolute()
+        or str(project.expanduser().resolve()) != attachment.project
+    ):
+        raise AgentPostError(
+            f"invalid Codex session attachment project at {path}"
+        )
+    from .routing import workspace_seats
+
+    if profile.name not in workspace_seats(office, project):
+        raise AgentPostError(
+            f"Codex session attachment mailbox {profile.name} is no longer "
+            f"reachable from {project}"
+        )
     return attachment
 
 
@@ -193,6 +253,7 @@ def attach_codex_session(
             observed_generation=observation.generation,
         )
         _write_attachment(
+            office,
             codex_session_attachment_path(office, session_id),
             attachment,
         )
@@ -223,6 +284,8 @@ def _compatible_session_observation(
             except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
                 continue
             if marker_session != session_id:
+                continue
+            if not math.isfinite(observed_at):
                 continue
             observations.append(
                 _CodexSessionObservation(
@@ -291,29 +354,18 @@ def _managed_bridge_matches(
     )
 
 
-def _read_private_json(path: Path) -> dict:
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+def _read_private_json(office: PostOffice, path: Path) -> dict:
     try:
-        descriptor = os.open(path, flags)
+        directory = _open_private_runtime_subdirectory(
+            office.root,
+            ("runtime", "codex-sessions"),
+        )
     except FileNotFoundError:
         raise
-    except OSError as exc:
-        raise AgentPostError(
-            f"cannot securely open Codex session attachment {path}: {exc}"
-        ) from exc
     try:
-        details = os.fstat(descriptor)
-        if not stat.S_ISREG(details.st_mode):
-            raise AgentPostError(f"Codex session attachment is not a file: {path}")
-        if details.st_uid != os.geteuid() or details.st_mode & 0o077:
-            raise AgentPostError(
-                f"insecure Codex session attachment ownership or permissions: {path}"
-            )
-        contents = os.read(descriptor, _MAX_ATTACHMENT_BYTES + 1)
+        contents = _read_private_file_at(directory, path.name, path)
     finally:
-        os.close(descriptor)
+        os.close(directory)
     if len(contents) > _MAX_ATTACHMENT_BYTES:
         raise AgentPostError(f"Codex session attachment is too large: {path}")
     try:
@@ -325,24 +377,42 @@ def _read_private_json(path: Path) -> dict:
     return value
 
 
-def _write_attachment(path: Path, attachment: CodexSessionAttachment) -> None:
-    path.parent.mkdir(
-        mode=PRIVATE_DIRECTORY_MODE,
-        parents=True,
-        exist_ok=True,
-    )
-    directory = path.parent.lstat()
-    if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.geteuid():
-        raise AgentPostError(
-            f"insecure Codex session attachment directory: {path.parent}"
-        )
-    os.chmod(path.parent, PRIVATE_DIRECTORY_MODE)
-    descriptor, temporary = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.name}-",
+def _unlink_attachment(office: PostOffice, path: Path) -> None:
+    directory = _open_private_runtime_subdirectory(
+        office.root,
+        ("runtime", "codex-sessions"),
     )
     try:
-        os.fchmod(descriptor, PRIVATE_FILE_MODE)
+        try:
+            os.unlink(path.name, dir_fd=directory)
+        except FileNotFoundError:
+            pass
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _write_attachment(
+    office: PostOffice,
+    path: Path,
+    attachment: CodexSessionAttachment,
+) -> None:
+    directory = _open_private_runtime_subdirectory(
+        office.root,
+        ("runtime", "codex-sessions"),
+        create=True,
+    )
+    temporary = f".{path.name}.{uuid.uuid4().hex}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(
+        temporary,
+        flags,
+        PRIVATE_FILE_MODE,
+        dir_fd=directory,
+    )
+    try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(
                 {
@@ -357,9 +427,20 @@ def _write_attachment(path: Path, attachment: CodexSessionAttachment) -> None:
                 },
                 handle,
                 sort_keys=True,
+                allow_nan=False,
             )
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        os.replace(
+            temporary,
+            path.name,
+            src_dir_fd=directory,
+            dst_dir_fd=directory,
+        )
+        os.fsync(directory)
     finally:
-        Path(temporary).unlink(missing_ok=True)
+        try:
+            os.unlink(temporary, dir_fd=directory)
+        except FileNotFoundError:
+            pass
+        os.close(directory)

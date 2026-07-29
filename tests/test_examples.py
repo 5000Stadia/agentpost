@@ -46,8 +46,15 @@ class DocumentationExampleTest(unittest.TestCase):
             "SECURITY.md",
             "recursive-include docs *.md",
             "recursive-include scripts *.py *.sh",
+            "recursive-include specs *.md",
         ):
             self.assertIn(required, manifest)
+        for required_spec in (
+            "CODEX-SESSION-ATTACH-V1.md",
+            "PROJECT-QUALIFIED-IDENTITIES-V1.md",
+            "SAFE-WIPE-V1.md",
+        ):
+            self.assertTrue((ROOT / "specs" / required_spec).is_file())
         installer = (ROOT / "scripts/install.sh").read_text(encoding="utf-8")
         self.assertIn(
             f'git+https://github.com/5000Stadia/agentpost.git@{tag}',

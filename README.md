@@ -256,7 +256,9 @@ agentpost attach reviewer
 ```
 
 The command verifies the current `CODEX_THREAD_ID`, reachable workspace seat,
-hook ABI, and mailbox consumer ownership. It reports `boundary-only` unless the
+hook event and ABI, finite coherent expiry, owner-private attachment directory,
+and mailbox consumer ownership. Invalid pre-existing attachment state fails
+closed during ordinary identity lookup. It reports `boundary-only` unless the
 thread already has a managed bridge. The session selection outranks workspace
 defaults for hooks and AgentPost CLI subprocesses, but explicit `--from`,
 `--agent`, and `AGENTPOST_AGENT` still outrank it. See
@@ -381,11 +383,15 @@ retain canonical mailbox-key semantics for scripts.
 ### Clean starts
 
 `agentpost wipe agent` removes the current mailbox, mail, bindings, adapter
-state, workspace references, and group membership. Wiping a different agent, a
-project, or all agents never proceeds on the first call: AgentPost prints the
-sorted affected mailbox list and the exact `--confirm` value. Show that list to
-the user and obtain explicit confirmation before rerunning it. A changed list
-invalidates the confirmation, and other live consumers must be stopped.
+state, workspace references, and group membership. It needs no affected-box
+confirmation, but still refuses a held consumer lease; close the seat and run
+its final self-wipe from a terminal with `AGENTPOST_AGENT=NAME`. Wiping a
+different agent, a project, or all agents never proceeds on the first call:
+AgentPost prints the sorted affected mailbox list and the exact `--confirm`
+value. Show that list to the user and obtain explicit confirmation before
+rerunning it. A changed list invalidates the confirmation, and every live
+consumer must be stopped. Wipe holds each authoritative lease fence through
+mailbox detachment.
 
 Wipe never touches source or AgentBridge repositories. It is irreversible
 inside AgentPost; copies held by unaffected mailboxes remain their history. See

@@ -30,6 +30,7 @@ from .panels import ask, panel_status, wait_for_panel
 from .adapters import MailboxWatcher
 from .codex_session import attach_codex_session
 from .installer import armed, doctor, install, uninstall, upgrade
+from .ownership import ConsumerLease
 from .presence import agent_presence
 from .review import prepare_review, render_review_request
 from .native import (
@@ -1176,21 +1177,36 @@ def _wipe(office: PostOffice, args: argparse.Namespace) -> None:
         print("RECOVERY\tnothing was deleted")
         return
 
-    active = tuple(
-        name
-        for name in targets
-        if name != acting and agent_presence(office, name).active
-    )
-    if active:
-        raise AgentPostError(
-            "stop these live mailbox consumers before wiping: "
-            + ",".join(active)
+    fences = []
+    try:
+        for name in sorted(targets):
+            fence = ConsumerLease(
+                office,
+                name,
+                "wipe-fence",
+                cwd=args.project if args.wipe_scope == "project" else Path.cwd(),
+            )
+            if not fence.acquire():
+                owner = fence.current_owner()
+                detail = (
+                    f"{owner.get('adapter', 'unknown')} pid "
+                    f"{owner.get('pid', '?')} instance "
+                    f"{owner.get('instance_id', '?')}"
+                    if owner
+                    else "another live instance"
+                )
+                raise AgentPostError(
+                    f"stop the live mailbox consumer for {name} before wiping: "
+                    f"{detail}"
+                )
+            fences.append(fence)
+        removed = office.wipe_agents(
+            targets,
+            purge_all_attachments=args.wipe_scope == "all",
         )
-
-    removed = office.wipe_agents(
-        targets,
-        purge_all_attachments=args.wipe_scope == "all",
-    )
+    finally:
+        for fence in reversed(fences):
+            fence.release()
     print(f"WIPED\t{args.wipe_scope}\t{','.join(removed)}")
     print(
         "RECOVERY\tirreversible; copies held by unaffected mailboxes were not removed"

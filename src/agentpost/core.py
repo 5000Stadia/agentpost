@@ -451,103 +451,97 @@ class PostOffice:
         )
         config = self.root / "config.toml"
         marker_paths = tuple(project / ".agentpost.toml" for project in affected_projects)
-        attachment_directory = self.root / "runtime" / "codex-sessions"
-        attachment_paths = []
-        for path in sorted(attachment_directory.glob("*.json")):
-            if purge_all_attachments:
-                attachment_paths.append(path)
-                continue
-            try:
-                attachment_agent = str(
-                    json.loads(path.read_text(encoding="utf-8"))["agent"]
-                )
-            except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
-                raise AgentPostError(
-                    f"cannot safely inspect Codex session attachment {path}: {exc}"
-                ) from exc
-            if attachment_agent in roster:
-                attachment_paths.append(path)
         snapshots = tuple(
             (path, path.read_bytes() if path.exists() else None)
             for path in (
                 config,
                 *binding_paths,
                 *marker_paths,
-                *attachment_paths,
             )
+        )
+        attachments = _WipeAttachmentSet.prepare(
+            self.root,
+            roster,
+            purge_all=purge_all_attachments,
         )
 
         stage = self.root / f".wipe-{uuid.uuid4().hex}"
-        _private_directory(stage)
-        staged: list[tuple[Path, Path]] = []
         try:
-            for name in roster:
-                source = self._agent_dir(name)
-                destination = stage / name
-                os.replace(source, destination)
-                staged.append((source, destination))
-            _fsync_directory(self.agents_dir)
-            _fsync_directory(stage)
+            _private_directory(stage)
+            staged: list[tuple[Path, Path]] = []
+            try:
+                for name in roster:
+                    source = self._agent_dir(name)
+                    destination = stage / name
+                    os.replace(source, destination)
+                    staged.append((source, destination))
+                _fsync_directory(self.agents_dir)
+                _fsync_directory(stage)
 
-            for path in binding_paths:
-                path.unlink(missing_ok=True)
-            if binding_paths:
-                _fsync_directory(self.bindings_dir)
-            for path in attachment_paths:
-                path.unlink(missing_ok=True)
-            if attachment_paths:
-                _fsync_directory(attachment_directory)
+                for path in binding_paths:
+                    path.unlink(missing_ok=True)
+                if binding_paths:
+                    _fsync_directory(self.bindings_dir)
+                attachments.unlink()
 
-            _atomic_write(
-                config,
-                _config_to_toml(
-                    remaining_groups,
-                    self.connection_mode(),
-                ).encode("utf-8"),
-            )
-            remaining_bindings = tuple(
-                binding
-                for binding in all_bindings
-                if binding.agent not in roster
-            )
-            for project in affected_projects:
-                self._rewrite_workspace_identity(
-                    project,
-                    (
-                        binding.agent
-                        for binding in remaining_bindings
-                        if Path(binding.project) == project
-                    ),
+                _atomic_write(
+                    config,
+                    _config_to_toml(
+                        remaining_groups,
+                        self.connection_mode(),
+                    ).encode("utf-8"),
                 )
-        except Exception as exc:
-            rollback_errors = []
-            for source, destination in reversed(staged):
+                remaining_bindings = tuple(
+                    binding
+                    for binding in all_bindings
+                    if binding.agent not in roster
+                )
+                for project in affected_projects:
+                    self._rewrite_workspace_identity(
+                        project,
+                        (
+                            binding.agent
+                            for binding in remaining_bindings
+                            if Path(binding.project) == project
+                        ),
+                    )
+            except Exception as exc:
+                rollback_errors = []
+                for source, destination in reversed(staged):
+                    try:
+                        if destination.exists() and not source.exists():
+                            os.replace(destination, source)
+                    except OSError as rollback_exc:
+                        rollback_errors.append(f"{source}: {rollback_exc}")
+                for path, contents in reversed(snapshots):
+                    try:
+                        _restore_file(path, contents)
+                    except OSError as rollback_exc:
+                        rollback_errors.append(f"{path}: {rollback_exc}")
                 try:
-                    if destination.exists() and not source.exists():
-                        os.replace(destination, source)
+                    attachments.restore()
                 except OSError as rollback_exc:
-                    rollback_errors.append(f"{source}: {rollback_exc}")
-            for path, contents in reversed(snapshots):
-                try:
-                    _restore_file(path, contents)
-                except OSError as rollback_exc:
-                    rollback_errors.append(f"{path}: {rollback_exc}")
-            shutil.rmtree(stage, ignore_errors=True)
-            if rollback_errors:
-                raise AgentPostError(
-                    "wipe failed and rollback was incomplete: "
-                    + "; ".join(rollback_errors)
-                ) from exc
-            raise
+                    rollback_errors.append(
+                        f"{attachments.path}: {rollback_exc}"
+                    )
+                shutil.rmtree(stage, ignore_errors=True)
+                if rollback_errors:
+                    raise AgentPostError(
+                        "wipe failed and rollback was incomplete: "
+                        + "; ".join(rollback_errors)
+                    ) from exc
+                raise
 
-        try:
-            shutil.rmtree(stage)
-        except OSError as exc:
-            raise AgentPostError(
-                f"mailboxes were detached but wipe staging remains at {stage}: {exc}"
-            ) from exc
-        _fsync_directory(self.root)
-        return roster
+            try:
+                shutil.rmtree(stage)
+            except OSError as exc:
+                raise AgentPostError(
+                    f"mailboxes were detached but wipe staging remains at {stage}: {exc}"
+                ) from exc
+            _fsync_directory(self.root)
+            return roster
+        finally:
+            attachments.close()
 
     def bind_agent(self, name: str, cli: str, project: str | Path) -> Path:
         self.load_profile(name)
@@ -1488,6 +1482,220 @@ def _git_exclude_path(project: Path) -> Path | None:
     if not git.is_dir():
         return None
     return git / "info" / "exclude"
+
+
+@dataclass
+class _WipeAttachmentSet:
+    path: Path
+    descriptor: int | None
+    files: tuple[tuple[str, bytes], ...]
+
+    @classmethod
+    def prepare(
+        cls,
+        root: Path,
+        roster: tuple[str, ...],
+        *,
+        purge_all: bool,
+    ) -> _WipeAttachmentSet:
+        path = root / "runtime" / "codex-sessions"
+        try:
+            descriptor = _open_private_runtime_subdirectory(
+                root,
+                ("runtime", "codex-sessions"),
+            )
+        except FileNotFoundError:
+            return cls(path, None, ())
+        selected = []
+        try:
+            for name in sorted(os.listdir(descriptor)):
+                if not name.endswith(".json") or "/" in name or "\x00" in name:
+                    continue
+                contents = _read_private_file_at(
+                    descriptor,
+                    name,
+                    path / name,
+                )
+                if not purge_all:
+                    try:
+                        attachment_agent = str(
+                            json.loads(contents)["agent"]
+                        )
+                    except (
+                        KeyError,
+                        TypeError,
+                        UnicodeDecodeError,
+                        json.JSONDecodeError,
+                    ) as exc:
+                        raise AgentPostError(
+                            "cannot safely inspect Codex session attachment "
+                            f"{path / name}: {exc}"
+                        ) from exc
+                    if attachment_agent not in roster:
+                        continue
+                selected.append((name, contents))
+        except Exception:
+            os.close(descriptor)
+            raise
+        return cls(path, descriptor, tuple(selected))
+
+    def unlink(self) -> None:
+        if self.descriptor is None:
+            return
+        for name, _contents in self.files:
+            os.unlink(name, dir_fd=self.descriptor)
+        if self.files:
+            os.fsync(self.descriptor)
+
+    def restore(self) -> None:
+        if self.descriptor is None:
+            return
+        for name, contents in self.files:
+            _write_private_file_at(self.descriptor, name, contents)
+        if self.files:
+            os.fsync(self.descriptor)
+
+    def close(self) -> None:
+        if self.descriptor is not None:
+            os.close(self.descriptor)
+            self.descriptor = None
+
+
+def _open_private_runtime_subdirectory(
+    root: Path,
+    parts: tuple[str, ...],
+    *,
+    create: bool = False,
+) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(root, flags)
+    except OSError as exc:
+        raise AgentPostError(
+            f"cannot securely open AgentPost runtime root {root}: {exc}"
+        ) from exc
+    current = root
+    try:
+        _require_private_directory(descriptor, current)
+        for part in parts:
+            current = current / part
+            try:
+                child = os.open(part, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(
+                        part,
+                        PRIVATE_DIRECTORY_MODE,
+                        dir_fd=descriptor,
+                    )
+                except FileExistsError:
+                    pass
+                child = os.open(part, flags, dir_fd=descriptor)
+            except OSError as exc:
+                raise AgentPostError(
+                    f"cannot securely open AgentPost runtime directory "
+                    f"{current}: {exc}"
+                ) from exc
+            try:
+                _require_private_directory(child, current)
+            except Exception:
+                os.close(child)
+                raise
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _require_private_directory(descriptor: int, path: Path) -> None:
+    details = os.fstat(descriptor)
+    if (
+        not stat.S_ISDIR(details.st_mode)
+        or details.st_uid != os.geteuid()
+        or stat.S_IMODE(details.st_mode) != PRIVATE_DIRECTORY_MODE
+    ):
+        raise AgentPostError(
+            f"insecure AgentPost runtime directory ownership or permissions: {path}"
+        )
+
+
+def _read_private_file_at(
+    directory: int,
+    name: str,
+    path: Path,
+) -> bytes:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(name, flags, dir_fd=directory)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise AgentPostError(
+            f"cannot securely open AgentPost runtime file {path}: {exc}"
+        ) from exc
+    try:
+        details = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or details.st_uid != os.geteuid()
+            or stat.S_IMODE(details.st_mode) != PRIVATE_FILE_MODE
+        ):
+            raise AgentPostError(
+                f"insecure AgentPost runtime file ownership or permissions: {path}"
+            )
+        chunks = []
+        while True:
+            chunk = os.read(descriptor, 64 * 1024)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+    finally:
+        os.close(descriptor)
+
+
+def _write_private_file_at(
+    directory: int,
+    name: str,
+    contents: bytes,
+) -> None:
+    temporary = f".{name}.{uuid.uuid4().hex}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(
+        temporary,
+        flags,
+        PRIVATE_FILE_MODE,
+        dir_fd=directory,
+    )
+    try:
+        view = memoryview(contents)
+        while view:
+            written = os.write(descriptor, view)
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    try:
+        os.replace(
+            temporary,
+            name,
+            src_dir_fd=directory,
+            dst_dir_fd=directory,
+        )
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=directory)
+        except FileNotFoundError:
+            pass
 
 
 def _restore_file(path: Path, contents: bytes | None) -> None:

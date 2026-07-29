@@ -69,8 +69,12 @@ document records schema version, mailbox, project, attachment and expiry times,
 and the lifecycle event and hook generation that proved compatibility.
 
 - The directory is mode `0700`; documents are mode `0600`.
-- Reads reject non-regular files, wrong ownership, permissive modes, malformed
-  JSON, schema mismatch, and digest mismatch.
+- Reads securely traverse owner-private runtime directories without following
+  symlinks and reject non-regular files, wrong ownership, permissive directory
+  or file modes, malformed JSON, schema mismatch, digest mismatch, unknown
+  hook events, incompatible dispatcher generations, non-finite or incoherent
+  timestamps, uninitialized mailboxes, and seats no longer reachable from the
+  recorded project.
 - Writes use a same-directory temporary file, `fsync`, and atomic replacement.
 - Attachments expire after 30 days. The next lookup removes an expired entry
   and resumes normal workspace identity resolution.

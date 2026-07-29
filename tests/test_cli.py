@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from agentpost import PostOffice, Profile, UnknownAgentError  # noqa: E402
 from agentpost.cli import _infer_join_agent, _join, main  # noqa: E402
 from agentpost.installer import UpgradeResult  # noqa: E402
+from agentpost.ownership import ConsumerLease  # noqa: E402
 
 
 class JoinCommandTest(unittest.TestCase):
@@ -558,6 +559,104 @@ class JoinCommandTest(unittest.TestCase):
             tuple(profile.name for profile in self.office.list_profiles()),
             ("app", "pb"),
         )
+
+    def test_confirmed_wipe_refuses_an_authoritative_consumer_lease(self) -> None:
+        owner = ConsumerLease(self.office, "pb", "python")
+        owner.require()
+        errors = StringIO()
+        try:
+            with patch.dict(
+                os.environ,
+                {"AGENTPOST_AGENT": "app"},
+                clear=False,
+            ):
+                with redirect_stdout(StringIO()), redirect_stderr(errors):
+                    result = main(
+                        [
+                            "--root",
+                            str(self.root),
+                            "wipe",
+                            "project",
+                            "pattern-buffer",
+                            "--confirm",
+                            "pb",
+                        ]
+                    )
+        finally:
+            owner.release()
+
+        self.assertEqual(result, 1)
+        self.assertIn(
+            "stop the live mailbox consumer for pb before wiping",
+            errors.getvalue(),
+        )
+        self.assertEqual(self.office.load_profile("pb").name, "pb")
+
+    def test_self_wipe_does_not_bypass_an_unmatched_live_lease(self) -> None:
+        owner = ConsumerLease(self.office, "app", "unrelated-owner")
+        owner.require()
+        errors = StringIO()
+        try:
+            with patch.dict(
+                os.environ,
+                {"AGENTPOST_AGENT": "app"},
+                clear=False,
+            ):
+                with redirect_stdout(StringIO()), redirect_stderr(errors):
+                    result = main(
+                        [
+                            "--root",
+                            str(self.root),
+                            "wipe",
+                            "agent",
+                        ]
+                    )
+        finally:
+            owner.release()
+
+        self.assertEqual(result, 1)
+        self.assertIn(
+            "stop the live mailbox consumer for app before wiping",
+            errors.getvalue(),
+        )
+        self.assertEqual(self.office.load_profile("app").name, "app")
+
+    def test_wipe_holds_consumer_fence_through_mailbox_detach(self) -> None:
+        contender = ConsumerLease(self.office, "pb", "late-consumer")
+        original = PostOffice.wipe_agents
+
+        def guarded_wipe(office, names, **kwargs):
+            self.assertFalse(contender.acquire())
+            return original(office, names, **kwargs)
+
+        with patch.object(
+            PostOffice,
+            "wipe_agents",
+            autospec=True,
+            side_effect=guarded_wipe,
+        ):
+            with patch.dict(
+                os.environ,
+                {"AGENTPOST_AGENT": "app"},
+                clear=False,
+            ):
+                with redirect_stdout(StringIO()):
+                    result = main(
+                        [
+                            "--root",
+                            str(self.root),
+                            "wipe",
+                            "project",
+                            "pattern-buffer",
+                            "--confirm",
+                            "pb",
+                        ]
+                    )
+
+        self.assertEqual(result, 0)
+        with self.assertRaises(UnknownAgentError):
+            contender.acquire()
+        self.assertFalse((self.root / "agents" / "pb").exists())
 
     def test_profile_help_teaches_searchable_durable_nameplates(self) -> None:
         output = StringIO()

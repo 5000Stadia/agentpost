@@ -376,6 +376,77 @@ class CodexSessionAttachTest(unittest.TestCase):
         with self.assertRaisesRegex(AgentPostError, "insecure"):
             load_codex_session_attachment(self.office, self.thread_id)
 
+    def test_preexisting_invalid_attachment_provenance_fails_closed(self) -> None:
+        self._attach()
+        path = codex_session_attachment_path(self.office, self.thread_id)
+        valid = json.loads(path.read_text(encoding="utf-8"))
+        unrelated = Path(self.temp.name) / "unrelated-project"
+        unrelated.mkdir()
+        cases = (
+            (
+                "event",
+                {"observed_event": "not-a-hook"},
+                "invalid Codex session attachment event",
+            ),
+            (
+                "generation",
+                {"observed_generation": "0.0.2+codex.20260601000000"},
+                "incompatible attach ABI",
+            ),
+            (
+                "non-finite",
+                {"expires_at": float("nan")},
+                "non-finite Codex session attachment timestamp",
+            ),
+            (
+                "ttl",
+                {"expires_at": valid["expires_at"] + 1},
+                "incoherent Codex session attachment timestamps",
+            ),
+            (
+                "unreachable",
+                {"project": str(unrelated)},
+                "no longer reachable",
+            ),
+        )
+        for label, change, expected in cases:
+            with self.subTest(label=label):
+                payload = {**valid, **change}
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                path.chmod(0o600)
+                with self.assertRaisesRegex(AgentPostError, expected):
+                    load_codex_session_attachment(self.office, self.thread_id)
+                with self.assertRaisesRegex(AgentPostError, expected):
+                    identify_agent_source(
+                        self.office,
+                        self.project,
+                        cli="codex",
+                        session_id=self.thread_id,
+                    )
+
+    def test_permissive_attachment_directory_fails_closed(self) -> None:
+        self._attach()
+        path = codex_session_attachment_path(self.office, self.thread_id)
+        path.parent.chmod(0o755)
+        try:
+            with self.assertRaisesRegex(
+                AgentPostError,
+                "insecure AgentPost runtime directory",
+            ):
+                load_codex_session_attachment(self.office, self.thread_id)
+            with self.assertRaisesRegex(
+                AgentPostError,
+                "insecure AgentPost runtime directory",
+            ):
+                identify_agent_source(
+                    self.office,
+                    self.project,
+                    cli="codex",
+                    session_id=self.thread_id,
+                )
+        finally:
+            path.parent.chmod(0o700)
+
     def test_attach_cli_reports_boundary_capability_without_installing(self) -> None:
         output = StringIO()
         errors = StringIO()

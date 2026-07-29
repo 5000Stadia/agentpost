@@ -56,9 +56,17 @@ match the current sorted mailbox set byte-for-byte. If a mailbox is added or
 removed between preview and execution, the stale confirmation fails and a new
 list must be confirmed.
 
-Another live mailbox consumer must be stopped before it can be wiped. The
-current seat may perform its own final self-wipe, but a project or all-agent
-wipe must not race other active seats.
+Any held mailbox consumer lease must be stopped before its mailbox can be
+wiped, including a live adapter for a nominal self-wipe. Self-wipe is exempt
+from the affected-box confirmation only; after closing the adapter it can be
+run from a terminal with `AGENTPOST_AGENT=NAME`. The command acquires the
+authoritative consumer leases for every target and holds those fences through
+mailbox detachment, so consumer startup cannot race a confirmed wipe.
+
+Codex attachment cleanup securely opens each owner-private runtime directory
+without following symlinks, validates selected files, and unlinks relative to
+the held directory descriptor. A symlinked, non-owned, or permissive
+attachment path fails before any mailbox mutation.
 
 ## Recovery
 

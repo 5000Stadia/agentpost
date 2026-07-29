@@ -67,6 +67,19 @@ compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.m
   observed older cache no longer reports `CURRENT` merely because its own
   historical hooks agree with it; the preview names the required
   all-sessions-closed replacement before the real upgrade is attempted.
+- Safe wipe now opens the attachment directory without following symlinks,
+  requires owner-private directory and file state, and unlinks relative to a
+  held directory descriptor. A malicious `runtime/codex-sessions` link can no
+  longer make agent or all-scope cleanup remove JSON outside AgentPost.
+- Wipe liveness now fences the authoritative mailbox consumer locks through
+  detachment instead of trusting heartbeat-derived presence. This closes both
+  lease-before-heartbeat deletion and consumer-start races; even self-wipe
+  refuses an unmatched live lease.
+- Ordinary Codex attachment lookup now revalidates the directory, hook event
+  and stable ABI, finite coherent 30-day lifetime, initialized mailbox, and
+  recorded-project reachability before selecting the attached seat.
+- Source distributions now include the public v1.3 specifications linked by
+  the README.
 - `agentpost reply MESSAGE_ID` with an inferred sender now answers from the
   seat that actually holds the letter, instead of always acting as the single
   workspace default. A runtime notified as an alternate seat sharing the

@@ -191,15 +191,18 @@ agentpost wipe project other-project
 agentpost wipe all
 ```
 
-The first form wipes only the currently resolved mailbox and needs no second
-confirmation. It is the seat's final action; that session must stop using the
-identity afterwards.
+The first form wipes only the currently resolved mailbox and needs no
+affected-box confirmation. It still refuses a held inbound consumer lease,
+including that seat's live adapter. Close the adapter, then run the final
+command from a terminal with `AGENTPOST_AGENT=NAME`; the deleted identity must
+not be used afterwards.
 
 Every broader form performs a preview first. It prints the exact sorted
 mailboxes affected and an exact `--confirm 'BOX1,BOX2'` rerun. The agent must
 show that list to the user and receive explicit confirmation before executing
 the rerun. A changed mailbox set invalidates stale confirmation. Other live
-mailbox consumers must be stopped first.
+mailbox consumers must be stopped first. The command acquires the authoritative
+consumer leases and holds them through mailbox detachment.
 
 Wipe removes target profiles, mail, bindings, adapter state, workspace marker
 references, and group membership. It never removes a source or bridge
@@ -400,10 +403,12 @@ agentpost codex --agent reviewer resume THREAD_ID
 ```
 
 Attachments are owner-only atomic files keyed by a hash of the thread ID,
-expire after 30 days, and do not publish presence. Explicit command or
-environment identities outrank them. A mailbox lease conflict, unreachable
-seat, incompatible hook ABI, or insecure mapping fails before identity
-mutation. The complete contract is in
+expire after 30 days, and do not publish presence. Every lookup revalidates the
+owner-private directory and file, known hook event, stable ABI, finite coherent
+30-day lifetime, initialized mailbox, and current workspace reachability.
+Explicit command or environment identities outrank them. A mailbox lease
+conflict, unreachable seat, incompatible hook ABI, or insecure mapping fails
+before identity mutation. The complete contract is in
 `specs/CODEX-SESSION-ATTACH-V1.md`.
 
 Inside an attached thread, `doctor` adds `codex-session-attachment` as an

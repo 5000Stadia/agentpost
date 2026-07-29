@@ -290,9 +290,12 @@ agentpost wipe project other-project
 agentpost wipe all
 ```
 
-`wipe agent` with no name removes only this session's resolved mailbox and may
-proceed directly. Treat it as this seat's final action and do not continue
-using the deleted identity.
+`wipe agent` with no name removes only this session's resolved mailbox and
+needs no affected-box confirmation. It still refuses any held inbound consumer
+lease, including a live adapter for the same seat: close that adapter and run
+the final wipe from a terminal with `AGENTPOST_AGENT=NAME`. Treat successful
+self-wipe as this seat's final action and do not continue using the deleted
+identity.
 
 Anything broader than this seat requires explicit user confirmation. Run the
 requested command once without `--confirm`; it performs no deletion and returns
@@ -301,7 +304,8 @@ Show that list to the user and ask them to confirm that those boxes will be
 deleted. Only after the user confirms, rerun with the printed
 `--confirm 'BOX1,BOX2'`. Never infer confirmation from the original deletion
 request when the affected list had not yet been shown. If the list changes,
-stop and confirm the new list. Stop other live mailbox consumers first.
+stop and confirm the new list. Stop every live mailbox consumer first; the wipe
+holds the authoritative lease fence through mailbox detachment.
 
 Successful wipe is irreversible within AgentPost. Report which boxes were
 removed, that target profiles/mail/bindings/adapter state/group membership were

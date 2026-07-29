@@ -92,6 +92,9 @@ class PostOfficeTest(unittest.TestCase):
         attachment = self.root / "runtime" / "codex-sessions" / "cx.json"
         attachment.parent.mkdir(parents=True)
         attachment.write_text('{"agent": "cx"}', encoding="utf-8")
+        (self.root / "runtime").chmod(0o700)
+        attachment.parent.chmod(0o700)
+        attachment.chmod(0o600)
 
         self.assertEqual(self.office.wipe_agents(("cx",)), ("cx",))
         self.assertFalse(attachment.exists())
@@ -122,11 +125,63 @@ class PostOfficeTest(unittest.TestCase):
         )
         stale_attachment.parent.mkdir(parents=True, exist_ok=True)
         stale_attachment.write_text('{"agent": "missing"}', encoding="utf-8")
+        stale_attachment.chmod(0o600)
         self.assertEqual(
             self.office.wipe_agents((), purge_all_attachments=True),
             (),
         )
         self.assertFalse(stale_attachment.exists())
+
+    def test_wipe_agents_rejects_attachment_directory_symlink_escape(self) -> None:
+        for scope in ("agent", "all"):
+            with self.subTest(scope=scope), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary) / "post"
+                office = PostOffice(root)
+                office.register_profile(profile("cx"))
+                external = Path(temporary) / "source-repository"
+                external.mkdir()
+                external_file = external / "release.json"
+                external_file.write_text('{"agent": "cx"}', encoding="utf-8")
+                runtime = root / "runtime"
+                runtime.mkdir(mode=0o700)
+                (runtime / "codex-sessions").symlink_to(
+                    external,
+                    target_is_directory=True,
+                )
+
+                with self.assertRaisesRegex(
+                    AgentPostError,
+                    "cannot securely open AgentPost runtime directory",
+                ):
+                    office.wipe_agents(
+                        ("cx",) if scope == "agent" else (),
+                        purge_all_attachments=scope == "all",
+                    )
+
+                self.assertEqual(office.load_profile("cx").name, "cx")
+                self.assertEqual(
+                    external_file.read_text(encoding="utf-8"),
+                    '{"agent": "cx"}',
+                )
+
+    def test_wipe_agents_rejects_permissive_attachment_directory(self) -> None:
+        runtime = self.root / "runtime"
+        attachments = runtime / "codex-sessions"
+        attachments.mkdir(parents=True)
+        runtime.chmod(0o700)
+        attachments.chmod(0o755)
+        attachment = attachments / "cx.json"
+        attachment.write_text('{"agent": "cx"}', encoding="utf-8")
+        attachment.chmod(0o600)
+
+        with self.assertRaisesRegex(
+            AgentPostError,
+            "insecure AgentPost runtime directory",
+        ):
+            self.office.wipe_agents(("cx",))
+
+        self.assertTrue(attachment.exists())
+        self.assertEqual(self.office.load_profile("cx").name, "cx")
 
     def test_wipe_agents_rolls_back_before_irreversible_stage_cleanup(self) -> None:
         project = Path(self.temp.name) / "rollback-project"
