@@ -286,8 +286,14 @@ class PostOffice:
         return self.root / "bindings"
 
     @property
-    def _mailbox_namespace_lock(self) -> Path:
+    def _mailbox_namespace_lock_path(self) -> Path:
         return self.root / ".mailbox-namespace.lock"
+
+    @contextmanager
+    def _locked_mailbox_namespace(self):
+        self.initialize()
+        with _exclusive_lock(self._mailbox_namespace_lock_path):
+            yield
 
     def initialize(self, connection_mode: str | None = None) -> Path:
         _private_directory(self.root, parents=True)
@@ -362,8 +368,7 @@ class PostOffice:
 
     def register_profile(self, profile: Profile) -> Path:
         profile.validate()
-        self.initialize()
-        with _exclusive_lock(self._mailbox_namespace_lock):
+        with self._locked_mailbox_namespace():
             agent_dir = self._agent_dir(profile.name)
             _private_directory(agent_dir, parents=True)
             for directory in MAILBOX_DIRS:
@@ -420,8 +425,7 @@ class PostOffice:
         purge_all_attachments: bool = False,
     ) -> tuple[str, ...]:
         """Irreversibly remove complete mailboxes and their routing metadata."""
-        self.initialize()
-        with _exclusive_lock(self._mailbox_namespace_lock):
+        with self._locked_mailbox_namespace():
             return self._wipe_agents_locked(
                 names,
                 purge_all_attachments=purge_all_attachments,

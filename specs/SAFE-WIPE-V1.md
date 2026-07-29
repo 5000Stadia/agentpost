@@ -65,7 +65,9 @@ mailbox detachment, so consumer startup cannot race a confirmed wipe.
 Profile registration and wipe also share a root-level mailbox-namespace lock.
 Supported same-name creation therefore cannot replace the staged mailbox and
 acquire a different consumer-lock inode during the transaction. Wipe
-revalidates every target's absence before commit.
+derives the current target set, validates confirmation, acquires consumer
+fences, and commits while holding that namespace lock, then revalidates every
+target's absence before commit.
 
 Codex attachment cleanup securely opens each owner-private runtime directory
 without following symlinks, validates selected files, and unlinks relative to

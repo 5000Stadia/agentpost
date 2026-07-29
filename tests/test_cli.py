@@ -3,8 +3,10 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -657,6 +659,80 @@ class JoinCommandTest(unittest.TestCase):
         with self.assertRaises(UnknownAgentError):
             contender.acquire()
         self.assertFalse((self.root / "agents" / "pb").exists())
+
+    def test_project_wipe_selects_targets_under_the_namespace_fence(self) -> None:
+        updated = replace(
+            self.office.load_profile("pb"),
+            projects=("different-project",),
+        )
+        update_started = threading.Event()
+        release_update = threading.Event()
+        update_errors = []
+        wipe_results = []
+        wipe_errors = StringIO()
+        original_verify = self.office._verify_atomic_mailbox
+
+        def pause_profile_update(agent_dir: Path) -> None:
+            update_started.set()
+            if not release_update.wait(3):
+                raise AssertionError("test did not release profile update")
+            original_verify(agent_dir)
+
+        def run_update() -> None:
+            try:
+                self.office.register_profile(updated)
+            except BaseException as exc:
+                update_errors.append(exc)
+
+        def run_wipe() -> None:
+            with redirect_stdout(StringIO()), redirect_stderr(wipe_errors):
+                wipe_results.append(
+                    main(
+                        [
+                            "--root",
+                            str(self.root),
+                            "wipe",
+                            "project",
+                            "pattern-buffer",
+                            "--confirm",
+                            "pb",
+                        ]
+                    )
+                )
+
+        with patch.object(
+            self.office,
+            "_verify_atomic_mailbox",
+            side_effect=pause_profile_update,
+        ):
+            update_thread = threading.Thread(target=run_update)
+            update_thread.start()
+            self.assertTrue(update_started.wait(3))
+
+            wipe_thread = threading.Thread(target=run_wipe)
+            wipe_thread.start()
+            try:
+                wipe_thread.join(0.2)
+                self.assertTrue(wipe_thread.is_alive())
+            finally:
+                release_update.set()
+
+            update_thread.join(3)
+            wipe_thread.join(3)
+
+        self.assertFalse(update_thread.is_alive())
+        self.assertFalse(wipe_thread.is_alive())
+        self.assertEqual(update_errors, [])
+        self.assertEqual(wipe_results, [1])
+        self.assertIn(
+            "wipe confirmation does not match the current affected mailboxes",
+            wipe_errors.getvalue(),
+        )
+        self.assertIn("Affected mailboxes: (none)", wipe_errors.getvalue())
+        self.assertEqual(
+            self.office.load_profile("pb").projects,
+            ("different-project",),
+        )
 
     def test_profile_help_teaches_searchable_durable_nameplates(self) -> None:
         output = StringIO()

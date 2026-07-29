@@ -1121,6 +1121,11 @@ def _resolve_mailbox_address(
 
 
 def _wipe(office: PostOffice, args: argparse.Namespace) -> None:
+    with office._locked_mailbox_namespace():
+        _wipe_locked(office, args)
+
+
+def _wipe_locked(office: PostOffice, args: argparse.Namespace) -> None:
     try:
         acting = identify_agent(
             office,
@@ -1130,6 +1135,7 @@ def _wipe(office: PostOffice, args: argparse.Namespace) -> None:
     except (AgentPostError, OSError, ValueError):
         acting = None
 
+    missing_project_error = None
     if args.wipe_scope == "agent":
         if args.agent is None:
             if acting is None:
@@ -1148,9 +1154,13 @@ def _wipe(office: PostOffice, args: argparse.Namespace) -> None:
         label = f"agent {targets[0]}"
         confirmation_required = acting != targets[0]
     elif args.wipe_scope == "project":
-        targets = tuple(
-            profile.name for profile in project_profiles(office, args.project)
-        )
+        try:
+            targets = tuple(
+                profile.name for profile in project_profiles(office, args.project)
+            )
+        except UnknownAgentError as exc:
+            targets = ()
+            missing_project_error = exc
         label = f"project {args.project}"
         confirmation_required = True
     else:
@@ -1164,6 +1174,8 @@ def _wipe(office: PostOffice, args: argparse.Namespace) -> None:
             f"wipe confirmation does not match the current affected mailboxes. "
             f"Affected mailboxes: {expected or '(none)'}"
         )
+    if missing_project_error is not None:
+        raise missing_project_error
     if confirmation_required and args.confirm != expected:
         raise AgentPostError(
             f"confirmation required before wiping {label}. Affected mailboxes: "
@@ -1172,7 +1184,7 @@ def _wipe(office: PostOffice, args: argparse.Namespace) -> None:
         )
     if not targets:
         if args.wipe_scope == "all":
-            office.wipe_agents((), purge_all_attachments=True)
+            office._wipe_agents_locked((), purge_all_attachments=True)
         print(f"WIPED\t{args.wipe_scope}\t-")
         print("RECOVERY\tnothing was deleted")
         return
@@ -1200,7 +1212,7 @@ def _wipe(office: PostOffice, args: argparse.Namespace) -> None:
                     f"{detail}"
                 )
             fences.append(fence)
-        removed = office.wipe_agents(
+        removed = office._wipe_agents_locked(
             targets,
             purge_all_attachments=args.wipe_scope == "all",
         )
