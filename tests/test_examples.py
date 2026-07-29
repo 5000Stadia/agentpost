@@ -46,8 +46,15 @@ class DocumentationExampleTest(unittest.TestCase):
             "SECURITY.md",
             "recursive-include docs *.md",
             "recursive-include scripts *.py *.sh",
+            "recursive-include specs *.md",
         ):
             self.assertIn(required, manifest)
+        for required_spec in (
+            "CODEX-SESSION-ATTACH-V1.md",
+            "PROJECT-QUALIFIED-IDENTITIES-V1.md",
+            "SAFE-WIPE-V1.md",
+        ):
+            self.assertTrue((ROOT / "specs" / required_spec).is_file())
         installer = (ROOT / "scripts/install.sh").read_text(encoding="utf-8")
         self.assertIn(
             f'git+https://github.com/5000Stadia/agentpost.git@{tag}',
@@ -67,7 +74,7 @@ class DocumentationExampleTest(unittest.TestCase):
                 (ROOT / relative).read_text(encoding="utf-8"),
             )
         self.assertIn(
-            f"## [{version}] - 2026-07-27",
+            f"## [{version}] - 2026-07-28",
             (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"),
         )
         self.assertIn(
@@ -118,7 +125,7 @@ class DocumentationExampleTest(unittest.TestCase):
                         cli="python",
                         kind="project",
                         summary=f"Python quick-start {name}",
-                        projects=(f"{name}-project",),
+                        projects=("python-quickstart",),
                     )
                 )
 
@@ -688,7 +695,9 @@ class DocumentationExampleTest(unittest.TestCase):
         self.assertIn("offer the user the first unused numbered mailbox", skill)
         self.assertIn("numbered identity is a separate durable mailbox", skill)
         self.assertIn("move mail already addressed to `NAME`", skill)
-        self.assertIn("cannot retroactively become an alternate identity", skill)
+        self.assertIn("agentpost attach NAME", skill)
+        self.assertIn("Do not use `join` or replace a plugin", skill)
+        self.assertIn("without publishing presence", skill)
         self.assertIn("do not describe it as live readiness", skill)
 
         generated_paths = (

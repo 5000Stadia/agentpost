@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,8 +10,12 @@ from .core import PostOffice
 
 
 CODEX_PLUGIN_ID = "agentpost@agentpost-local"
-CODEX_HOOK_GENERATION = "0.0.5+codex.20260712082137"
+CODEX_HOOK_GENERATION = "0.0.6+codex.20260728214546"
 CODEX_HOOK_EVENTS = ("session-start", "user-prompt-submit", "stop")
+CODEX_STABLE_DISPATCH_MIN_RELEASE = (0, 0, 3)
+_CODEX_GENERATION_RE = re.compile(
+    r"^(\d+)\.(\d+)\.(\d+)(?:\+codex\.(\d{14}))?$"
+)
 
 
 @dataclass(frozen=True)
@@ -23,6 +28,41 @@ class CodexGenerationStatus:
     @property
     def current(self) -> bool:
         return self.state == "current"
+
+
+def codex_generation_release(generation: str) -> tuple[int, int, int] | None:
+    match = _CODEX_GENERATION_RE.fullmatch(generation)
+    if match is None:
+        return None
+    return tuple(int(value) for value in match.groups()[:3])
+
+
+def codex_newer_generation_is_compatible(
+    installed: str,
+    expected: str,
+) -> bool:
+    installed_release = codex_generation_release(installed)
+    expected_release = codex_generation_release(expected)
+    if installed_release is None or expected_release is None:
+        return False
+    if (
+        installed_release[:2] != expected_release[:2]
+        or expected_release < CODEX_STABLE_DISPATCH_MIN_RELEASE
+    ):
+        return False
+    if installed_release > expected_release:
+        return True
+    if installed_release != expected_release:
+        return False
+    installed_match = _CODEX_GENERATION_RE.fullmatch(installed)
+    expected_match = _CODEX_GENERATION_RE.fullmatch(expected)
+    installed_stamp = installed_match.group(4) if installed_match else None
+    expected_stamp = expected_match.group(4) if expected_match else None
+    return bool(
+        installed_stamp
+        and expected_stamp
+        and installed_stamp > expected_stamp
+    )
 
 
 def codex_hook_marker(office: PostOffice, agent: str, event: str) -> Path:

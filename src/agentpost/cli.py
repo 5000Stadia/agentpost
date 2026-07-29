@@ -6,12 +6,20 @@ import os
 import sys
 from pathlib import Path
 
-from .core import AgentPostError, MessageNotFoundError, PostOffice, Profile
+from .core import (
+    AgentPostError,
+    MessageNotFoundError,
+    PostOffice,
+    Profile,
+    UnknownAgentError,
+)
 from .routing import (
     find_agents,
     identify_agent,
     identify_agent_source,
+    project_profiles,
     project_candidates,
+    qualified_addresses,
     resolve_channel_recipients,
     resolve_group,
     resolve_identity,
@@ -20,7 +28,9 @@ from .routing import (
 )
 from .panels import ask, panel_status, wait_for_panel
 from .adapters import MailboxWatcher
+from .codex_session import attach_codex_session
 from .installer import armed, doctor, install, uninstall, upgrade
+from .ownership import ConsumerLease
 from .presence import agent_presence
 from .review import prepare_review, render_review_request
 from .native import (
@@ -41,10 +51,11 @@ _PROFILE_GUIDANCE = """good profile guidance:
                      decisions or outputs it can help with. Use terms a
                      coworker would actually search.
   roles              Broad workplace functions, such as release engineering.
-  projects           Stable project names and aliases users will mention.
+  projects           Stable dot-free project names and aliases users will use
+                     in PROJECT.SEAT addresses.
   specialties        Specific reusable technical or domain expertise.
-  handles             Two to five concrete request categories this agent
-                     should receive, such as schema reviews or launch copy.
+  handles            Two to five concrete request categories. Put a simple
+                     local seat handle first (nav, build, codereview).
   does-not-handle    Nearby responsibilities owned elsewhere.
 
 Prefer: "Owns Pattern Buffer temporal world-state semantics, ingestion
@@ -91,7 +102,10 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=_PROFILE_GUIDANCE,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    profile.add_argument("name", help="stable short mailbox address")
+    profile.add_argument(
+        "name",
+        help="stable short dot-free mailbox address; dot is reserved",
+    )
     profile.add_argument(
         "--display-name", required=True, help="recognizable human-facing name"
     )
@@ -110,7 +124,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     profile.add_argument("--organization", help="optional stable organization or team")
     profile.add_argument("--roles", default="", help="comma-separated workplace functions")
-    profile.add_argument("--projects", default="", help="comma-separated project names or aliases")
+    profile.add_argument(
+        "--projects",
+        default="",
+        help="comma-separated dot-free project names or aliases",
+    )
     profile.add_argument(
         "--project-roots", default="", help="comma-separated absolute project roots"
     )
@@ -128,6 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
     profiles_mode = profiles.add_mutually_exclusive_group()
     profiles_mode.add_argument("--all", action="store_true")
     profiles_mode.add_argument("--offline", action="store_true")
+    profiles.add_argument("--project")
 
     find = commands.add_parser("agents-find")
     find.add_argument("query", nargs="?")
@@ -136,9 +155,11 @@ def build_parser() -> argparse.ArgumentParser:
     find.add_argument("--specialty")
     find.add_argument("--all", action="store_true")
 
-    commands.add_parser("identities")
+    identities = commands.add_parser("identities")
+    identities.add_argument("--project")
     resolve = commands.add_parser("resolve")
     resolve.add_argument("label")
+    resolve.add_argument("--project")
 
     group = commands.add_parser("group-set")
     group.add_argument("name")
@@ -160,6 +181,15 @@ def build_parser() -> argparse.ArgumentParser:
     join.add_argument("--cli", choices=("antigravity", "claude", "codex", "python"))
     join.add_argument("--project", type=Path, default=Path.cwd())
     join.add_argument("--confirm-codex-sessions-closed", action="store_true")
+    attach = commands.add_parser(
+        "attach",
+        description=(
+            "Bind this already-running Codex thread to a reachable mailbox "
+            "without changing the workspace default or global plugin."
+        ),
+    )
+    attach.add_argument("agent")
+    attach.add_argument("--project", type=Path, default=Path.cwd())
     disconnect = commands.add_parser("disconnect")
     disconnect.add_argument(
         "--cli", choices=("antigravity", "claude", "codex"), required=True
@@ -168,6 +198,24 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("bindings")
     status = commands.add_parser("status")
     status.add_argument("agent", nargs="?")
+    status.add_argument("--project")
+
+    wipe = commands.add_parser(
+        "wipe",
+        description=(
+            "Irreversibly remove AgentPost mailbox state. This never deletes "
+            "source or bridge repositories."
+        ),
+    )
+    wipe_targets = wipe.add_subparsers(dest="wipe_scope", required=True)
+    wipe_agent = wipe_targets.add_parser("agent")
+    wipe_agent.add_argument("agent", nargs="?")
+    wipe_agent.add_argument("--confirm")
+    wipe_project = wipe_targets.add_parser("project")
+    wipe_project.add_argument("project")
+    wipe_project.add_argument("--confirm")
+    wipe_all = wipe_targets.add_parser("all")
+    wipe_all.add_argument("--confirm")
 
     send = commands.add_parser("send")
     send.add_argument("sender")
@@ -235,14 +283,17 @@ def build_parser() -> argparse.ArgumentParser:
     listing = commands.add_parser("list")
     listing.add_argument("agent")
     listing.add_argument("--state", choices=("unread", "read", "sent"), default="unread")
+    listing.add_argument("--project")
 
     read = commands.add_parser("read")
     read.add_argument("agent")
     read.add_argument("message_id")
+    read.add_argument("--project")
 
     claim = commands.add_parser("next")
     claim.add_argument("agent")
     claim.add_argument("--message-id")
+    claim.add_argument("--project")
 
     watch = commands.add_parser(
         "watch",
@@ -375,7 +426,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(office.register_profile(profile))
         elif args.command == "profiles":
-            for profile in office.list_profiles():
+            profiles = (
+                project_profiles(office, args.project)
+                if args.project
+                else office.list_profiles()
+            )
+            for profile in profiles:
                 presence = agent_presence(office, profile.name)
                 if not args.all and not args.offline and not presence.active:
                     continue
@@ -402,18 +458,32 @@ def main(argv: list[str] | None = None) -> int:
                     f"\t{evidence}"
                 )
         elif args.command == "identities":
-            print("type\taddress\tattention\tdisplay\tprojects\thandles\tsummary")
-            for profile in office.list_profiles():
+            print(
+                "type\taddress\tattention\tqualified\tdisplay\tprojects\t"
+                "handles\tsummary"
+            )
+            profiles = (
+                project_profiles(office, args.project)
+                if args.project
+                else office.list_profiles()
+            )
+            for profile in profiles:
                 presence = agent_presence(office, profile.name)
+                qualified = ",".join(qualified_addresses(profile)) or "-"
                 print(
                     f"agent\t{profile.name}\t{presence.state}\t"
+                    f"{qualified}\t"
                     f"{profile.display_name}\t{','.join(profile.projects)}\t"
                     f"{','.join(profile.handles)}\t{profile.summary}"
                 )
-            for name, members in sorted(office.list_groups().items()):
-                print(f"group\t@{name}\t-\t{name}\t{','.join(members)}")
+            if args.project is None:
+                for name, members in sorted(office.list_groups().items()):
+                    print(
+                        f"group\t@{name}\t-\t-\t{name}\t-\t-\t"
+                        f"{','.join(members)}"
+                    )
         elif args.command == "resolve":
-            _print_resolution(office, args.label)
+            _print_resolution(office, args.label, project=args.project)
         elif args.command == "group-set":
             print(office.set_group(args.name, _csv(args.members)))
         elif args.command == "groups":
@@ -436,6 +506,47 @@ def main(argv: list[str] | None = None) -> int:
                 args.project,
                 confirm_codex_sessions_closed=args.confirm_codex_sessions_closed,
             )
+        elif args.command == "attach":
+            profile = office.load_profile(
+                _resolve_mailbox_address(office, args.agent)
+            )
+            thread_id = os.environ.get("CODEX_THREAD_ID", "")
+            project = args.project.expanduser().resolve()
+            result = attach_codex_session(
+                office,
+                profile.name,
+                thread_id,
+                project,
+                allowed_agents=workspace_seats(office, project),
+                explicit_agent=os.environ.get("AGENTPOST_AGENT"),
+                bridge_active=os.environ.get("AGENTPOST_CODEX_BRIDGE") == "1",
+            )
+            installed = result.installed_generation or (
+                f"unknown ({result.installed_problem})"
+            )
+            print(
+                f"{result.state.upper()}\t{profile.name}\tcodex-session\t"
+                f"{result.attachment.session_digest[:12]}"
+            )
+            print(
+                f"DELIVERY\t{result.delivery}\t"
+                f"observed-hook={result.attachment.observed_generation}\t"
+                f"installed-plugin={installed}"
+            )
+            print(
+                "PRESENCE\t"
+                + (
+                    "managed live bridge remains wake-capable"
+                    if result.delivery == "live-bridge"
+                    else "boundary-only; attach publishes no presence and cannot "
+                    "wake an already-idle thread"
+                )
+            )
+            if result.delivery != "live-bridge":
+                print(
+                    f"NEXT\tfor already-idle wake, relaunch with `agentpost codex "
+                    f"--agent {profile.name} resume {thread_id}`"
+                )
         elif args.command == "disconnect":
             if not office.unbind_agent(args.cli, args.project):
                 raise ValueError(
@@ -445,14 +556,25 @@ def main(argv: list[str] | None = None) -> int:
             for binding in office.list_bindings():
                 print(f"{binding.agent}\t{binding.cli}\t{binding.project}")
         elif args.command == "status":
-            names = (
-                (args.agent,)
-                if args.agent
-                else tuple(profile.name for profile in office.list_profiles())
-            )
+            if args.agent:
+                names = (
+                    _resolve_mailbox_address(
+                        office,
+                        args.agent,
+                        project=args.project,
+                    ),
+                )
+            elif args.project:
+                names = tuple(
+                    profile.name for profile in project_profiles(office, args.project)
+                )
+            else:
+                names = tuple(profile.name for profile in office.list_profiles())
             for name in names:
                 presence = agent_presence(office, name)
                 print(f"{name}\t{presence.state}\t{presence.detail}")
+        elif args.command == "wipe":
+            _wipe(office, args)
         elif args.command == "send":
             recipients = resolve_recipients(
                 office,
@@ -584,7 +706,11 @@ def main(argv: list[str] | None = None) -> int:
             _warn_unarmed(office, recipients)
         elif args.command == "notify":
             sender = _channel_sender(office, args.sender)
-            recipient = resolve_identity(office, args.recipient).name
+            recipient = resolve_identity(
+                office,
+                args.recipient,
+                sender=sender,
+            ).name
             request = office.request_notification(
                 sender,
                 recipient,
@@ -604,17 +730,32 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "list":
-            for record in office.list_messages(args.agent, args.state):
+            agent = _resolve_mailbox_address(
+                office,
+                args.agent,
+                project=args.project,
+            )
+            for record in office.list_messages(agent, args.state):
                 letter = record.letter
                 print(
                     f"{letter.message_id}\t{letter.from_agent}\t"
                     f"{letter.kind}\t{letter.subject or ''}"
                 )
         elif args.command == "read":
-            record = office.read(args.agent, args.message_id)
+            agent = _resolve_mailbox_address(
+                office,
+                args.agent,
+                project=args.project,
+            )
+            record = office.read(agent, args.message_id)
             sys.stdout.buffer.write(record.path.read_bytes())
         elif args.command == "next":
-            record = office.claim(args.agent, args.message_id)
+            agent = _resolve_mailbox_address(
+                office,
+                args.agent,
+                project=args.project,
+            )
+            record = office.claim(agent, args.message_id)
             sys.stdout.buffer.write(record.path.read_bytes())
         elif args.command == "watch":
             watcher = MailboxWatcher(office, args.agent, args.interval)
@@ -818,7 +959,19 @@ def _mailbox_miss(
 
 def _channel_sender(office: PostOffice, requested: str | None) -> str:
     if requested is not None:
-        return resolve_identity(office, requested).name
+        try:
+            acting = identify_agent(
+                office,
+                Path.cwd(),
+                agent=os.environ.get("AGENTPOST_AGENT"),
+            ).name
+        except (AgentPostError, OSError, ValueError):
+            acting = None
+        return _resolve_mailbox_address(
+            office,
+            requested,
+            sender=acting,
+        )
     return identify_agent(
         office,
         Path.cwd(),
@@ -890,13 +1043,25 @@ def _holds_letter(office: PostOffice, agent: str, message_id: str) -> bool:
     return True
 
 
-def _print_resolution(office: PostOffice, label: str) -> None:
+def _print_resolution(
+    office: PostOffice,
+    label: str,
+    *,
+    project: str | None = None,
+) -> None:
     groups = office.list_groups()
     name = resolve_group(office, label)
     if name is not None:
+        if project is not None:
+            raise ValueError(
+                "groups are global addresses and cannot be combined with --project; "
+                "use @GROUP explicitly"
+            )
         if not label.startswith("@"):
             try:
-                identity = resolve_identity(office, label)
+                identity = office.load_profile(
+                    _resolve_mailbox_address(office, label)
+                )
             except AgentPostError:
                 identity = None
             if identity is not None:
@@ -906,9 +1071,158 @@ def _print_resolution(office: PostOffice, label: str) -> None:
                 )
         print(f"group\t@{name}\t{','.join(groups[name])}")
         return
-    profile = resolve_identity(office, label)
+    profile = office.load_profile(
+        _resolve_mailbox_address(
+            office,
+            label,
+            project=project,
+        )
+    )
     presence = agent_presence(office, profile.name)
-    print(f"agent\t{profile.name}\t{presence.state}\t{profile.display_name}")
+    qualified = ",".join(qualified_addresses(profile)) or "-"
+    print(
+        f"agent\t{profile.name}\t{presence.state}\t{qualified}\t"
+        f"{profile.display_name}"
+    )
+
+
+def _resolve_mailbox_address(
+    office: PostOffice,
+    label: str,
+    *,
+    project: str | None = None,
+    sender: str | None = None,
+) -> str:
+    if project is not None or "." in label:
+        return resolve_identity(
+            office,
+            label,
+            project=project,
+            sender=sender,
+        ).name
+    if sender is None:
+        try:
+            sender = identify_agent(
+                office,
+                Path.cwd(),
+                agent=os.environ.get("AGENTPOST_AGENT"),
+            ).name
+        except (AgentPostError, OSError, ValueError):
+            sender = None
+    if sender is not None:
+        return resolve_identity(office, label, sender=sender).name
+    known = {profile.name for profile in office.list_profiles()}
+    if label in known:
+        return office.load_profile(label).name
+    raise UnknownAgentError(
+        f"unqualified AgentPost address {label!r} has no project context; "
+        "use PROJECT.SEAT, --project PROJECT, or a canonical mailbox key"
+    )
+
+
+def _wipe(office: PostOffice, args: argparse.Namespace) -> None:
+    with office._locked_mailbox_namespace():
+        _wipe_locked(office, args)
+
+
+def _wipe_locked(office: PostOffice, args: argparse.Namespace) -> None:
+    try:
+        acting = identify_agent(
+            office,
+            Path.cwd(),
+            agent=os.environ.get("AGENTPOST_AGENT"),
+        ).name
+    except (AgentPostError, OSError, ValueError):
+        acting = None
+
+    missing_project_error = None
+    if args.wipe_scope == "agent":
+        if args.agent is None:
+            if acting is None:
+                raise UnknownAgentError(
+                    "cannot infer this agent; name the mailbox to wipe"
+                )
+            targets = (acting,)
+        else:
+            targets = (
+                _resolve_mailbox_address(
+                    office,
+                    args.agent,
+                    sender=acting,
+                ),
+            )
+        label = f"agent {targets[0]}"
+        confirmation_required = acting != targets[0]
+    elif args.wipe_scope == "project":
+        try:
+            targets = tuple(
+                profile.name for profile in project_profiles(office, args.project)
+            )
+        except UnknownAgentError as exc:
+            targets = ()
+            missing_project_error = exc
+        label = f"project {args.project}"
+        confirmation_required = True
+    else:
+        targets = tuple(profile.name for profile in office.list_profiles())
+        label = "all agents"
+        confirmation_required = bool(targets)
+
+    expected = ",".join(sorted(targets))
+    if args.confirm is not None and args.confirm != expected:
+        raise AgentPostError(
+            f"wipe confirmation does not match the current affected mailboxes. "
+            f"Affected mailboxes: {expected or '(none)'}"
+        )
+    if missing_project_error is not None:
+        raise missing_project_error
+    if confirmation_required and args.confirm != expected:
+        raise AgentPostError(
+            f"confirmation required before wiping {label}. Affected mailboxes: "
+            f"{expected}. Ask the user to confirm this exact list, then rerun "
+            f"with `--confirm '{expected}'`."
+        )
+    if not targets:
+        if args.wipe_scope == "all":
+            office._wipe_agents_locked((), purge_all_attachments=True)
+        print(f"WIPED\t{args.wipe_scope}\t-")
+        print("RECOVERY\tnothing was deleted")
+        return
+
+    fences = []
+    try:
+        for name in sorted(targets):
+            fence = ConsumerLease(
+                office,
+                name,
+                "wipe-fence",
+                cwd=args.project if args.wipe_scope == "project" else Path.cwd(),
+            )
+            if not fence.acquire():
+                owner = fence.current_owner()
+                detail = (
+                    f"{owner.get('adapter', 'unknown')} pid "
+                    f"{owner.get('pid', '?')} instance "
+                    f"{owner.get('instance_id', '?')}"
+                    if owner
+                    else "another live instance"
+                )
+                raise AgentPostError(
+                    f"stop the live mailbox consumer for {name} before wiping: "
+                    f"{detail}"
+                )
+            fences.append(fence)
+        removed = office._wipe_agents_locked(
+            targets,
+            purge_all_attachments=args.wipe_scope == "all",
+        )
+    finally:
+        for fence in reversed(fences):
+            fence.release()
+    print(f"WIPED\t{args.wipe_scope}\t{','.join(removed)}")
+    print(
+        "RECOVERY\tirreversible; copies held by unaffected mailboxes were not removed"
+    )
 
 
 def _print_channel_delivery(office, sender, recipients, result) -> None:

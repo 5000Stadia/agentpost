@@ -135,8 +135,9 @@ profile's own `cli` field into its connected adapters and reports one even when
 nothing is bound.
 
 Directory search and role/project/specialty selectors exclude offline agents by
-default. Exact mailbox names and explicit named groups may target offline
-agents. Delivery still commits to `unread/`; only notification is unavailable.
+default. Project-qualified identities and explicit named groups may target
+offline agents. Low-level delivery may use exact canonical mailbox keys.
+Delivery still commits to `unread/`; only notification is unavailable.
 
 An original sender may append an ephemeral attention request under
 `agents/RECIPIENT/adapter/notifications/` for an existing unread Message-ID.
@@ -148,11 +149,23 @@ to defer the rest.
 
 Human-facing channel resolution is a separate operation from active-agent
 discovery. `resolve` and the `message`/`question` commands match registered
-canonical names, display names, project identities, and responsibility handles;
-bare named groups also expand. They include offline profiles because addressing
-a known coworker is durable delivery, not availability discovery. Tied matches
-are rejected instead of guessed. The sender is inferred from explicit process
-identity or the deepest current workspace identity source.
+canonical names, display names, roles, and responsibility handles within an
+exact project scope. Bare identities are restricted to profiles sharing a
+registered project entry with the sender and never fall back to the global
+directory. `PROJECT.SEAT` selects another project's scope explicitly and
+contains exactly one reserved dot. Bare named groups also expand; `@GROUP` is
+the explicit global group form. Addressing includes offline profiles because a
+known coworker remains a durable delivery target. Tied matches are rejected
+instead of guessed. The sender is inferred from explicit process identity or
+the deepest current workspace identity source.
+
+Clean-start deletion detaches complete target mailbox directories through a
+same-filesystem staging rename, commits binding, workspace-marker, Codex
+session-attachment, and group cleanup, then irreversibly removes the stage.
+Failure before final stage removal restores mailbox and metadata snapshots.
+Broader-than-self CLI scopes enumerate the current sorted targets and require
+that exact list as confirmation; source repositories are outside the protocol
+boundary.
 
 A reply by Message-ID narrows an inferred sender further. Among the mailboxes
 reachable from the current directory — the workspace default and its known

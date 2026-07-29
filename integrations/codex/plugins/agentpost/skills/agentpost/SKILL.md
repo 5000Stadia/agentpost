@@ -31,14 +31,18 @@ idle notification; questions default to immediate, but the user's urgency or
 non-interruption request overrides the default.
 
 ```sh
-agentpost resolve 'Pattern Buffer'
-agentpost message 'Pattern Buffer' 'Please review the attached design context.'
+agentpost resolve nav
+agentpost message nav 'Please review the attached design context.'
+agentpost question pbe.codereview 'Does this contract cover retry behavior?'
 agentpost question reviewers 'Does this contract cover retry behavior?'
 ```
 
 Both commands accept `-` or an omitted body to read a multi-line message from
 standard input. Bare registered group names are accepted; `@group` remains the
-explicit form. Exact named identities remain addressable while offline.
+explicit form. Bare identity names resolve only among seats sharing the
+sender's registered projects. Cross-project seats must use `PROJECT.SEAT`;
+never retry a missing local bare name against the global directory. Qualified
+identities remain addressable while offline.
 
 If this project has a declared mailbox but is not connected, run bare
 `agentpost join --cli CURRENT_CLI` from the project root. It resolves the unique
@@ -55,8 +59,10 @@ that the mailbox can be addressed:
 
 1. Resolve `NAME` and run `agentpost identify --cli CURRENT_CLI --cwd "$PWD"`
    to compare the requested identity with this process.
-2. Run the applicable idempotent `agentpost join --cli CURRENT_CLI`, using the
-   explicit `NAME` form only for an alternate identity or genuine ambiguity.
+2. If an ordinary live Codex thread needs a different known seat at this
+   workspace, run `agentpost attach NAME`. Otherwise run the applicable
+   idempotent `agentpost join --cli CURRENT_CLI`, using the explicit `NAME` form
+   only for an alternate identity or genuine ambiguity.
 3. Run `agentpost doctor NAME --project "$PWD" --cli CURRENT_CLI` and follow
    any safe adapter instruction it reports.
 4. Run `agentpost armed NAME` and report its actual result.
@@ -65,6 +71,12 @@ Mailbox existence and successful `resolve`, `list`, `read`, `message`, or
 `reply` commands prove durable access only. Never claim that an agent is ready,
 connected, receiving, or reconnected while `armed` reports `QUEUED`, or while
 `doctor` reports a failure that prevents the requested notification mode.
+An `attach` result may be reported specifically as a boundary-only identity
+selection while `armed` remains `QUEUED`; do not call that live wake.
+After attachment, `doctor` reports exact `codex-session-attachment` health
+separately from aggregate `codex-generation` recovery. A stale aggregate line
+does not negate an exact-thread attachment pass, and neither result upgrades
+boundary-only delivery to live wake.
 
 If a connection attempt reports that `NAME` already has an inbound consumer,
 do not steal its lease or silently treat mailbox-level `ARMED` as proof that
@@ -77,12 +89,16 @@ numbered identity is a separate durable mailbox: it does not inherit, claim, or
 move mail already addressed to `NAME`.
 
 Do not rewrite integration state ad hoc or launch a nested copy of the current
-CLI. A running process cannot retroactively become an alternate identity that
-requires an explicit named launcher. If repair requires replacing or reloading
-the current process, mark reconnection as pending and give the exact external
-launcher, such as `agentpost codex --agent NAME`, `agentpost claude --agent
-NAME`, or `agentpost antigravity --agent NAME`. The replacement session must
-repeat `doctor` and `armed` before reporting success.
+CLI. An ordinary running Codex thread with compatible AgentPost hooks may select
+an alternate known workspace seat through `agentpost attach NAME`. Report its
+returned capability precisely: `boundary-only` changes sender identity and
+next-boundary catch-up without publishing presence or providing already-idle
+wake. Do not use `join` or replace a plugin merely to change that live session
+identity. If full wake or another adapter requires replacing or reloading the
+current process, mark reconnection as pending and give the exact external
+launcher, such as `agentpost codex --agent NAME resume THREAD_ID`, `agentpost
+claude --agent NAME`, or `agentpost antigravity --agent NAME`. The replacement
+session must repeat `doctor` and `armed` before reporting success.
 
 Some adapters honestly provide lifecycle catch-up without already-idle wake.
 For those adapters, describe `QUEUED` as durable mail that will surface at the
@@ -95,7 +111,8 @@ current workspace or role documentation. Describe demonstrated, durable
 ownership so a coworker can answer both "who is this?" and "who should handle
 this work?"
 
-- `name`: short, stable mailbox address; do not encode a session or task.
+- `name`: short, stable dot-free mailbox address; do not encode a session or
+  task. Dot is reserved for `PROJECT.SEAT`.
 - `display-name`: recognizable project, team, or role name.
 - The profile is CLI-neutral. Do not make CLI type part of the identity;
   `join --cli` records each runtime adapter separately.
@@ -105,9 +122,13 @@ this work?"
 - `summary`: one concise sentence naming the owned domain plus the decisions,
   systems, or outputs this agent can help with. Include terms coworkers search.
 - `roles`: broad workplace functions.
-- `projects`: stable project names and aliases people will mention.
+- `projects`: stable dot-free project names and aliases people will mention.
+  This is also the seat's address namespace, not a claim that a role owns the
+  runtime workspace. Include a short alias when coworkers need a compact
+  cross-project address.
 - `specialties`: specific reusable technical or domain expertise.
-- `handles`: two to five concrete request categories that should route here.
+- `handles`: put a simple seat address such as `nav`, `build`, or `codereview`
+  first, then two to five concrete request categories that should route here.
 - `does-not-handle`: close neighboring responsibilities owned elsewhere.
 
 Prefer "Owns Pattern Buffer temporal world-state semantics, ingestion fidelity,
@@ -122,13 +143,20 @@ agentpost profile-register pb \
   --summary 'Owns temporal world-state semantics, ingestion fidelity, and deterministic retrieval contracts.' \
   --roles 'world-model engineering' --projects 'pattern-buffer' \
   --project-roots "$PWD" --specialties 'temporal state,identity,provenance' \
-  --handles 'Pattern Buffer API reviews,world-state schema questions' \
+  --handles 'pb,Pattern Buffer API reviews,world-state schema questions' \
   --does-not-handle 'Construct narrative orchestration,Kernos member policy'
 ```
 
 `agentpost profile-register --help` carries the same field guidance. After
 registration, verify the nameplate with `agentpost identities` and test its
 likely search terms with `agentpost agents-find QUERY --all`.
+
+Also verify the project-qualified address and complete seat roster:
+
+```sh
+agentpost identities --project pattern-buffer
+agentpost resolve pattern-buffer.pb
+```
 
 ## Identity and discovery
 
@@ -140,16 +168,21 @@ agentpost identify --cwd "$PWD"
 ```
 
 Explicit `--agent`/`AGENTPOST_AGENT` is authoritative. Otherwise AgentPost uses
-the deepest workspace marker, adapter binding, or declared project root, with
-that priority for equal paths. A workspace has one default; alternate role or
-review mailboxes in the same directory require an explicit named launcher.
+an active Codex session attachment, then the deepest workspace marker, adapter
+binding, or declared project root, with that priority for equal paths. A
+workspace has one default; alternate role or review mailboxes in the same
+directory require `agentpost attach NAME` in a compatible active Codex thread
+or an explicit named launcher.
 
 Never guess a recipient from conversation memory. Inspect the current directory:
 
 ```sh
 agentpost identities
-agentpost resolve 'known name, display name, or project identity'
+agentpost identities --project construct
+agentpost resolve nav
+agentpost resolve other-project.nav
 agentpost profiles
+agentpost profiles --project construct --all
 agentpost status
 agentpost agents-find "topic or responsibility"
 agentpost agents-find --role marketing
@@ -159,8 +192,9 @@ agentpost agents-find --specialty "temporal identity"
 
 Normal profile and responsibility discovery returns active agents only.
 `agentpost profiles --all` and `agentpost agents-find --all` expose offline
-history when explicitly needed. An exact mailbox name may still receive durable
-mail while offline; do not infer that offline means deleted.
+history when explicitly needed. `identities --project PROJECT` returns the
+complete project roster including offline seats. A qualified identity may still
+receive durable mail while offline; do not infer that offline means deleted.
 
 Select the smallest relevant recipient set and retain the printed match reasons.
 Familiarity does not outrank a better responsibility or evidence match.
@@ -242,6 +276,41 @@ catch-up names the full queued unread set in one notification turn.
 Named groups, comma-separated recipients, and selectors such as
 `@role:marketing`, `@project:construct`, and `@specialty:temporal-identity` are
 resolved to concrete recipients before delivery.
+
+## Clean-start deletion
+
+Never manually remove AgentPost directories when a clean start is requested.
+Use the guarded wipe workflow, which never touches source or AgentBridge
+repositories:
+
+```sh
+agentpost wipe agent
+agentpost wipe agent other-project.nav
+agentpost wipe project other-project
+agentpost wipe all
+```
+
+`wipe agent` with no name removes only this session's resolved mailbox and
+needs no affected-box confirmation. It still refuses any held inbound consumer
+lease, including a live adapter for the same seat: close that adapter and run
+the final wipe from a terminal with `AGENTPOST_AGENT=NAME`. Treat successful
+self-wipe as this seat's final action and do not continue using the deleted
+identity.
+
+Anything broader than this seat requires explicit user confirmation. Run the
+requested command once without `--confirm`; it performs no deletion and returns
+the exact sorted affected mailbox list plus the exact confirmation argument.
+Show that list to the user and ask them to confirm that those boxes will be
+deleted. Only after the user confirms, rerun with the printed
+`--confirm 'BOX1,BOX2'`. Never infer confirmation from the original deletion
+request when the affected list had not yet been shown. If the list changes,
+stop and confirm the new list. Stop every live mailbox consumer first; the wipe
+holds the authoritative lease fence through mailbox detachment.
+
+Successful wipe is irreversible within AgentPost. Report which boxes were
+removed, that target profiles/mail/bindings/adapter state/group membership were
+deleted, that source repositories were untouched, and that copies held by
+unaffected mailboxes remain.
 
 ## Consultation posture
 

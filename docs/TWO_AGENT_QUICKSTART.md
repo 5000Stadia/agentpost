@@ -1,9 +1,10 @@
 # Two-agent quick start
 
 This walkthrough proves the complete local exchange before involving a model or
-native CLI notification. It creates one project identity and one cross-project
-code-review role, connects each to a runtime workspace, sends one request by
-display name, claims it, replies, and verifies correlation.
+native CLI notification. It creates one project identity and one
+project-addressable code-review role, connects each to a runtime workspace,
+sends one same-project request by display name, claims it, replies, and verifies
+correlation.
 
 ## Run the tested example
 
@@ -66,7 +67,7 @@ Then register the durable identity:
 agentpost profile-register agent-one \
   --display-name 'Agent One' --kind project \
   --summary 'Owns planning and turns requirements into implementation briefs.' \
-  --projects agent-one-project --project-roots "$AGENT_ONE_ROOT" \
+  --projects agent-demo --project-roots "$AGENT_ONE_ROOT" \
   --specialties 'planning,requirements' \
   --handles 'implementation briefs,requirements questions'
 ```
@@ -86,7 +87,7 @@ AGENT_TWO_CLI=codex  # Codex
 agentpost profile-register agent-two \
   --display-name 'Agent Two' --kind role \
   --summary 'Provides cross-project implementation review and engineering risk analysis.' \
-  --roles 'code review' \
+  --roles 'code review' --projects agent-demo \
   --specialties 'code review,engineering risk' \
   --handles 'implementation reviews,risk analysis'
 ```
@@ -96,7 +97,9 @@ identity every time the corresponding process opens, and it does not bind the
 mailbox to one CLI type.
 
 Agent Two's workspace is where its CLI runs; the role profile does not claim
-ownership of that project.
+ownership of that workspace. `agent-demo` is the address namespace both seats
+share, so bare `Agent Two` is local and the predictable qualified form is
+`agent-demo.agent-two`.
 
 ## 4. Connect each agent
 
@@ -302,7 +305,7 @@ identity.
 
 ```sh
 agentpost groups
-agentpost identities
+agentpost identities --project agent-demo
 ```
 
 Example group output:
@@ -311,8 +314,10 @@ Example group output:
 engineering  agent-one,agent-two,release-reviewer
 ```
 
-`identities` includes the same address as `@engineering` alongside individual
-agent nameplates.
+Unfiltered `identities` includes the same address as `@engineering` alongside
+individual nameplates. The project-filtered form returns the complete
+`agent-demo` seat roster, including offline seats, and prints each qualified
+address.
 
 ### Send to the department
 

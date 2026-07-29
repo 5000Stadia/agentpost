@@ -3,17 +3,20 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-from agentpost import PostOffice, Profile  # noqa: E402
+from agentpost import PostOffice, Profile, UnknownAgentError  # noqa: E402
 from agentpost.cli import _infer_join_agent, _join, main  # noqa: E402
 from agentpost.installer import UpgradeResult  # noqa: E402
+from agentpost.ownership import ConsumerLease  # noqa: E402
 
 
 class JoinCommandTest(unittest.TestCase):
@@ -101,7 +104,7 @@ class JoinCommandTest(unittest.TestCase):
                     "--root",
                     str(self.root),
                     "message",
-                    "Pattern Buffer",
+                    "pattern-buffer.pb",
                     "Please inspect the world model.",
                 ]
             )
@@ -179,7 +182,7 @@ class JoinCommandTest(unittest.TestCase):
                         "--root",
                         str(self.root),
                         "notify",
-                        "Pattern Buffer",
+                        "pattern-buffer.pb",
                         sent.message_id,
                         "--mode",
                         "immediate",
@@ -211,7 +214,7 @@ class JoinCommandTest(unittest.TestCase):
                         "--root",
                         str(self.root),
                         "message",
-                        "pb",
+                        "pattern-buffer.pb",
                         "Queued message.",
                     ]
                 )
@@ -233,7 +236,7 @@ class JoinCommandTest(unittest.TestCase):
                         "--root",
                         str(self.root),
                         "message",
-                        "pb",
+                        "pattern-buffer.pb",
                         "Queued message.",
                     ]
                 )
@@ -246,8 +249,20 @@ class JoinCommandTest(unittest.TestCase):
     def test_optional_channel_bodies_may_follow_flags(self) -> None:
         request = self.office.send("pb", "app", "Please reply.")
         commands = (
-            ["message", "pb", "--notify", "immediate", "message after flag"],
-            ["question", "pb", "--subject", "Review", "question after flag"],
+            [
+                "message",
+                "pattern-buffer.pb",
+                "--notify",
+                "immediate",
+                "message after flag",
+            ],
+            [
+                "question",
+                "pattern-buffer.pb",
+                "--subject",
+                "Review",
+                "question after flag",
+            ],
             [
                 "reply",
                 "app",
@@ -341,7 +356,8 @@ class JoinCommandTest(unittest.TestCase):
                 0,
             )
         self.assertIn(
-            "agent\tpb\toffline\tPattern Buffer\tpattern-buffer\t",
+            "agent\tpb\toffline\tpattern-buffer.pb\tPattern Buffer\t"
+            "pattern-buffer\t",
             identities.getvalue(),
         )
         self.assertTrue(identities.getvalue().startswith("type\taddress\tattention"))
@@ -349,10 +365,375 @@ class JoinCommandTest(unittest.TestCase):
         resolved = StringIO()
         with redirect_stdout(resolved):
             self.assertEqual(
-                main(["--root", str(self.root), "resolve", "Pattern Buffer"]),
+                main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "resolve",
+                        "Pattern Buffer",
+                        "--project",
+                        "pattern-buffer",
+                    ]
+                ),
                 0,
             )
-        self.assertEqual(resolved.getvalue(), "agent\tpb\toffline\tPattern Buffer\n")
+        self.assertEqual(
+            resolved.getvalue(),
+            "agent\tpb\toffline\tpattern-buffer.pb\tPattern Buffer\n",
+        )
+
+    def test_project_directory_filters_and_cross_project_addresses(self) -> None:
+        directory = StringIO()
+        with redirect_stdout(directory):
+            self.assertEqual(
+                main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "identities",
+                        "--project",
+                        "pattern-buffer",
+                    ]
+                ),
+                0,
+            )
+        self.assertIn("pattern-buffer.pb", directory.getvalue())
+        self.assertNotIn("\tagent\tapp\t", f"\t{directory.getvalue()}")
+
+        profiles = StringIO()
+        with redirect_stdout(profiles):
+            self.assertEqual(
+                main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "profiles",
+                        "--project",
+                        "pattern-buffer",
+                        "--all",
+                    ]
+                ),
+                0,
+            )
+        self.assertIn(
+            "pb\toffline\tclaude\tproject\tPersistent world state",
+            profiles.getvalue(),
+        )
+        self.assertNotIn("app\toffline", profiles.getvalue())
+
+        status = StringIO()
+        with redirect_stdout(status):
+            self.assertEqual(
+                main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "status",
+                        "--project",
+                        "pattern-buffer",
+                    ]
+                ),
+                0,
+            )
+        self.assertTrue(status.getvalue().startswith("pb\toffline\t"))
+
+        errors = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stdout(StringIO()), redirect_stderr(errors):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "message",
+                        "pb",
+                        "This must not cross projects.",
+                    ]
+                )
+        self.assertEqual(result, 1)
+        self.assertIn(
+            "cross-project addresses must use PROJECT.SEAT",
+            errors.getvalue(),
+        )
+
+    def test_project_wipe_previews_exact_boxes_and_requires_confirmation(
+        self,
+    ) -> None:
+        self.office.register_profile(
+            Profile(
+                name="pbr",
+                display_name="Pattern Buffer Review",
+                cli="codex",
+                kind="role",
+                summary="Reviews Pattern Buffer",
+                roles=("code review",),
+                projects=("pattern-buffer",),
+                handles=("codereview",),
+            )
+        )
+        errors = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stderr(errors):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "wipe",
+                        "project",
+                        "pattern-buffer",
+                    ]
+                )
+        self.assertEqual(result, 1)
+        self.assertIn("Affected mailboxes: pb,pbr", errors.getvalue())
+        self.assertIn("--confirm 'pb,pbr'", errors.getvalue())
+        self.assertEqual(self.office.load_profile("pb").name, "pb")
+
+        output = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stdout(output):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "wipe",
+                        "project",
+                        "pattern-buffer",
+                        "--confirm",
+                        "pb,pbr",
+                    ]
+                )
+        self.assertEqual(result, 0)
+        self.assertIn("WIPED\tproject\tpb,pbr", output.getvalue())
+        self.assertIn("RECOVERY\tirreversible", output.getvalue())
+        with self.assertRaises(UnknownAgentError):
+            self.office.load_profile("pb")
+        with self.assertRaises(UnknownAgentError):
+            self.office.load_profile("pbr")
+
+    def test_wiping_another_agent_requires_confirmation_but_self_wipe_does_not(
+        self,
+    ) -> None:
+        errors = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stderr(errors):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "wipe",
+                        "agent",
+                        "pattern-buffer.pb",
+                    ]
+                )
+        self.assertEqual(result, 1)
+        self.assertIn("Affected mailboxes: pb", errors.getvalue())
+
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stdout(StringIO()):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "wipe",
+                        "agent",
+                    ]
+                )
+        self.assertEqual(result, 0)
+        with self.assertRaises(UnknownAgentError):
+            self.office.load_profile("app")
+
+    def test_all_agent_wipe_rejects_a_stale_confirmation_list(self) -> None:
+        errors = StringIO()
+        with patch.dict("os.environ", {"AGENTPOST_AGENT": "app"}, clear=False):
+            with redirect_stderr(errors):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "wipe",
+                        "all",
+                        "--confirm",
+                        "app",
+                    ]
+                )
+        self.assertEqual(result, 1)
+        self.assertIn("Affected mailboxes: app,pb", errors.getvalue())
+        self.assertEqual(
+            tuple(profile.name for profile in self.office.list_profiles()),
+            ("app", "pb"),
+        )
+
+    def test_confirmed_wipe_refuses_an_authoritative_consumer_lease(self) -> None:
+        owner = ConsumerLease(self.office, "pb", "python")
+        owner.require()
+        errors = StringIO()
+        try:
+            with patch.dict(
+                os.environ,
+                {"AGENTPOST_AGENT": "app"},
+                clear=False,
+            ):
+                with redirect_stdout(StringIO()), redirect_stderr(errors):
+                    result = main(
+                        [
+                            "--root",
+                            str(self.root),
+                            "wipe",
+                            "project",
+                            "pattern-buffer",
+                            "--confirm",
+                            "pb",
+                        ]
+                    )
+        finally:
+            owner.release()
+
+        self.assertEqual(result, 1)
+        self.assertIn(
+            "stop the live mailbox consumer for pb before wiping",
+            errors.getvalue(),
+        )
+        self.assertEqual(self.office.load_profile("pb").name, "pb")
+
+    def test_self_wipe_does_not_bypass_an_unmatched_live_lease(self) -> None:
+        owner = ConsumerLease(self.office, "app", "unrelated-owner")
+        owner.require()
+        errors = StringIO()
+        try:
+            with patch.dict(
+                os.environ,
+                {"AGENTPOST_AGENT": "app"},
+                clear=False,
+            ):
+                with redirect_stdout(StringIO()), redirect_stderr(errors):
+                    result = main(
+                        [
+                            "--root",
+                            str(self.root),
+                            "wipe",
+                            "agent",
+                        ]
+                    )
+        finally:
+            owner.release()
+
+        self.assertEqual(result, 1)
+        self.assertIn(
+            "stop the live mailbox consumer for app before wiping",
+            errors.getvalue(),
+        )
+        self.assertEqual(self.office.load_profile("app").name, "app")
+
+    def test_wipe_holds_consumer_fence_through_mailbox_detach(self) -> None:
+        contender = ConsumerLease(self.office, "pb", "late-consumer")
+        original = PostOffice._wipe_agents_locked
+
+        def guarded_wipe(office, names, **kwargs):
+            self.assertFalse(contender.acquire())
+            return original(office, names, **kwargs)
+
+        with patch.object(
+            PostOffice,
+            "_wipe_agents_locked",
+            autospec=True,
+            side_effect=guarded_wipe,
+        ) as locked_wipe:
+            with patch.dict(
+                os.environ,
+                {"AGENTPOST_AGENT": "app"},
+                clear=False,
+            ):
+                with redirect_stdout(StringIO()):
+                    result = main(
+                        [
+                            "--root",
+                            str(self.root),
+                            "wipe",
+                            "project",
+                            "pattern-buffer",
+                            "--confirm",
+                            "pb",
+                        ]
+                    )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(locked_wipe.call_count, 1)
+        with self.assertRaises(UnknownAgentError):
+            contender.acquire()
+        self.assertFalse((self.root / "agents" / "pb").exists())
+
+    def test_project_wipe_selects_targets_under_the_namespace_fence(self) -> None:
+        updated = replace(
+            self.office.load_profile("pb"),
+            projects=("different-project",),
+        )
+        update_started = threading.Event()
+        release_update = threading.Event()
+        update_errors = []
+        wipe_results = []
+        wipe_errors = StringIO()
+        original_verify = self.office._verify_atomic_mailbox
+
+        def pause_profile_update(agent_dir: Path) -> None:
+            update_started.set()
+            if not release_update.wait(3):
+                raise AssertionError("test did not release profile update")
+            original_verify(agent_dir)
+
+        def run_update() -> None:
+            try:
+                self.office.register_profile(updated)
+            except BaseException as exc:
+                update_errors.append(exc)
+
+        def run_wipe() -> None:
+            with redirect_stdout(StringIO()), redirect_stderr(wipe_errors):
+                wipe_results.append(
+                    main(
+                        [
+                            "--root",
+                            str(self.root),
+                            "wipe",
+                            "project",
+                            "pattern-buffer",
+                            "--confirm",
+                            "pb",
+                        ]
+                    )
+                )
+
+        with patch.object(
+            self.office,
+            "_verify_atomic_mailbox",
+            side_effect=pause_profile_update,
+        ):
+            update_thread = threading.Thread(target=run_update)
+            update_thread.start()
+            self.assertTrue(update_started.wait(3))
+
+            wipe_thread = threading.Thread(target=run_wipe)
+            wipe_thread.start()
+            try:
+                wipe_thread.join(0.2)
+                self.assertTrue(wipe_thread.is_alive())
+            finally:
+                release_update.set()
+
+            update_thread.join(3)
+            wipe_thread.join(3)
+
+        self.assertFalse(update_thread.is_alive())
+        self.assertFalse(wipe_thread.is_alive())
+        self.assertEqual(update_errors, [])
+        self.assertEqual(wipe_results, [1])
+        self.assertIn(
+            "wipe confirmation does not match the current affected mailboxes",
+            wipe_errors.getvalue(),
+        )
+        self.assertIn("Affected mailboxes: (none)", wipe_errors.getvalue())
+        self.assertEqual(
+            self.office.load_profile("pb").projects,
+            ("different-project",),
+        )
 
     def test_profile_help_teaches_searchable_durable_nameplates(self) -> None:
         output = StringIO()

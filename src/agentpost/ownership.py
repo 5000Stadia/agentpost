@@ -41,14 +41,31 @@ class ConsumerLease:
     def acquire(self, *, blocking: bool = False) -> bool:
         if self.acquired:
             return True
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        handle = self.lock_path.open("a+b")
+        self.office.load_profile(self.agent)
+        try:
+            handle = self.lock_path.open("a+b")
+        except FileNotFoundError as exc:
+            raise AgentPostError(
+                f"mailbox {self.agent} is not initialized for consumer ownership"
+            ) from exc
         flags = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
         try:
             fcntl.flock(handle.fileno(), flags)
         except BlockingIOError:
             handle.close()
             return False
+        try:
+            self.office.load_profile(self.agent)
+            mailbox = self.office.root / "agents" / self.agent / "unread"
+            if not mailbox.is_dir():
+                raise AgentPostError(
+                    f"mailbox {self.agent} was removed before the consumer "
+                    "lease could be acquired"
+                )
+        except Exception:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+            raise
         self._handle = handle
         _atomic_json(
             self.owner_path,

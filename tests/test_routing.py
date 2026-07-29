@@ -18,6 +18,8 @@ from agentpost import (  # noqa: E402
 )
 from agentpost.routing import (  # noqa: E402
     identify_agent_source,
+    project_profiles,
+    qualified_addresses,
     resolve_channel_recipients,
     resolve_identity,
     resolve_recipients,
@@ -194,6 +196,10 @@ class RoutingTest(unittest.TestCase):
             resolve_identity(self.office, "Pattern Buffer").name,
             "pb",
         )
+        self.assertEqual(
+            resolve_identity(self.office, "cx", sender="cx").name,
+            "cx",
+        )
 
     def test_human_identity_does_not_fuzzy_route_partial_expertise(self) -> None:
         with self.assertRaisesRegex(UnknownAgentError, "agents-find"):
@@ -209,7 +215,7 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(
             resolve_channel_recipients(
                 self.office,
-                ("World Team, Kernos",),
+                ("World Team, kernos.k",),
                 sender="cx",
             ),
             ("pb", "c", "k"),
@@ -221,8 +227,84 @@ class RoutingTest(unittest.TestCase):
             resolve_channel_recipients(
                 self.office,
                 ("Pattern Buffer",),
-                sender="cx",
+                sender="pb",
             )
+
+    def test_project_qualified_addresses_disambiguate_repeated_seat_handles(
+        self,
+    ) -> None:
+        profiles = (
+            Profile(
+                name="p1n",
+                display_name="Project One Navigator",
+                cli="codex",
+                kind="project",
+                summary="Navigates project one",
+                projects=("project-one", "p1"),
+                handles=("nav",),
+            ),
+            Profile(
+                name="p1r",
+                display_name="Project One Reviewer",
+                cli="codex",
+                kind="role",
+                summary="Reviews project one",
+                roles=("code review",),
+                projects=("project-one", "p1"),
+                handles=("codereview",),
+            ),
+            Profile(
+                name="p2n",
+                display_name="Project Two Navigator",
+                cli="codex",
+                kind="project",
+                summary="Navigates project two",
+                projects=("project-two", "p2"),
+                handles=("nav",),
+            ),
+            Profile(
+                name="p2r",
+                display_name="Project Two Reviewer",
+                cli="codex",
+                kind="role",
+                summary="Reviews project two",
+                roles=("code review",),
+                projects=("project-two", "p2"),
+                handles=("codereview",),
+            ),
+        )
+        for profile in profiles:
+            self.office.register_profile(profile)
+
+        self.assertEqual(
+            tuple(item.name for item in project_profiles(self.office, "p2")),
+            ("p2n", "p2r"),
+        )
+        self.assertEqual(
+            qualified_addresses(self.office.load_profile("p1n")),
+            ("project-one.nav", "p1.nav"),
+        )
+        self.assertEqual(
+            resolve_identity(self.office, "codereview", sender="p1n").name,
+            "p1r",
+        )
+        self.assertEqual(
+            resolve_identity(self.office, "p2.codereview", sender="p1n").name,
+            "p2r",
+        )
+        with self.assertRaisesRegex(
+            UnknownAgentError,
+            "cross-project addresses must use PROJECT.SEAT",
+        ):
+            resolve_identity(self.office, "p2r", sender="p1n")
+
+    def test_qualified_address_has_exactly_one_reserved_dot(self) -> None:
+        self.assertEqual(
+            resolve_identity(self.office, "pattern-buffer.pb").name,
+            "pb",
+        )
+        with self.assertRaisesRegex(ValueError, "exactly PROJECT.SEAT"):
+            resolve_identity(self.office, "pattern.buffer.pb")
 
     def test_ambiguous_human_identity_is_not_guessed(self) -> None:
         self.office.register_profile(

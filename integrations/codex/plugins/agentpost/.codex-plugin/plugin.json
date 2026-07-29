@@ -1,6 +1,6 @@
 {
   "name": "agentpost",
-  "version": "0.0.5+codex.20260712082137",
+  "version": "0.0.6+codex.20260728214546",
   "description": "A named local communication channel for CLI agents",
   "author": {
     "name": "AgentPost contributors"

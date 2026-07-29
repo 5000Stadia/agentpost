@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import sys
 import time
@@ -93,6 +94,12 @@ class Profile:
                 raise ValueError(f"{label} must not be empty")
         if not (self.roles or self.projects or self.specialties):
             raise ValueError("profile needs at least one role, project, or specialty")
+        dotted_projects = [value for value in self.projects if "." in value]
+        if dotted_projects:
+            raise ValueError(
+                "project names and aliases must not contain '.'; dot is reserved "
+                "for PROJECT.SEAT addresses"
+            )
 
 
 @dataclass(frozen=True)
@@ -278,6 +285,16 @@ class PostOffice:
     def bindings_dir(self) -> Path:
         return self.root / "bindings"
 
+    @property
+    def _mailbox_namespace_lock_path(self) -> Path:
+        return self.root / ".mailbox-namespace.lock"
+
+    @contextmanager
+    def _locked_mailbox_namespace(self):
+        self.initialize()
+        with _exclusive_lock(self._mailbox_namespace_lock_path):
+            yield
+
     def initialize(self, connection_mode: str | None = None) -> Path:
         _private_directory(self.root, parents=True)
         _private_directory(self.agents_dir)
@@ -351,15 +368,15 @@ class PostOffice:
 
     def register_profile(self, profile: Profile) -> Path:
         profile.validate()
-        self.initialize()
-        agent_dir = self._agent_dir(profile.name)
-        _private_directory(agent_dir, parents=True)
-        for directory in MAILBOX_DIRS:
-            _private_directory(agent_dir / directory)
-        self._verify_atomic_mailbox(agent_dir)
-        path = agent_dir / "profile.toml"
-        _atomic_write(path, _profile_to_toml(profile).encode("utf-8"))
-        return path
+        with self._locked_mailbox_namespace():
+            agent_dir = self._agent_dir(profile.name)
+            _private_directory(agent_dir, parents=True)
+            for directory in MAILBOX_DIRS:
+                _private_directory(agent_dir / directory)
+            self._verify_atomic_mailbox(agent_dir)
+            path = agent_dir / "profile.toml"
+            _atomic_write(path, _profile_to_toml(profile).encode("utf-8"))
+            return path
 
     def load_profile(self, name: str) -> Profile:
         path = self._require_agent(name) / "profile.toml"
@@ -400,6 +417,193 @@ class PostOffice:
         for path in sorted(self.agents_dir.glob("*/profile.toml")):
             profiles.append(self.load_profile(path.parent.name))
         return tuple(profiles)
+
+    def wipe_agents(
+        self,
+        names: Iterable[str],
+        *,
+        purge_all_attachments: bool = False,
+    ) -> tuple[str, ...]:
+        """Irreversibly remove complete mailboxes and their routing metadata."""
+        with self._locked_mailbox_namespace():
+            return self._wipe_agents_locked(
+                names,
+                purge_all_attachments=purge_all_attachments,
+            )
+
+    def _wipe_agents_locked(
+        self,
+        names: Iterable[str],
+        *,
+        purge_all_attachments: bool,
+    ) -> tuple[str, ...]:
+        roster = tuple(sorted(dict.fromkeys(names)))
+        if not roster and not purge_all_attachments:
+            raise ValueError("at least one agent is required")
+        for name in roster:
+            self.load_profile(name)
+
+        all_bindings = self.list_bindings()
+        affected_bindings = tuple(
+            binding for binding in all_bindings if binding.agent in roster
+        )
+        affected_projects = tuple(
+            sorted({Path(binding.project) for binding in affected_bindings})
+        )
+        groups = self.list_groups()
+        remaining_groups = {
+            name: members
+            for name, roster_members in groups.items()
+            if (
+                members := tuple(
+                    member for member in roster_members if member not in roster
+                )
+            )
+        }
+        binding_paths = tuple(
+            self.bindings_dir
+            / (
+                hashlib.sha256(
+                    f"{binding.cli}\0{Path(binding.project)}".encode("utf-8")
+                ).hexdigest()
+                + ".toml"
+            )
+            for binding in affected_bindings
+        )
+        config = self.root / "config.toml"
+        marker_paths = tuple(project / ".agentpost.toml" for project in affected_projects)
+        snapshots = tuple(
+            (path, path.read_bytes() if path.exists() else None)
+            for path in (
+                config,
+                *binding_paths,
+                *marker_paths,
+            )
+        )
+        attachments = _WipeAttachmentSet.prepare(
+            self.root,
+            roster,
+            purge_all=purge_all_attachments,
+        )
+
+        stage = self.root / f".wipe-{uuid.uuid4().hex}"
+        try:
+            _private_directory(stage)
+            staged: list[tuple[Path, Path]] = []
+            try:
+                for name in roster:
+                    source = self._agent_dir(name)
+                    destination = stage / name
+                    os.replace(source, destination)
+                    staged.append((source, destination))
+                _fsync_directory(self.agents_dir)
+                _fsync_directory(stage)
+
+                for path in binding_paths:
+                    path.unlink(missing_ok=True)
+                if binding_paths:
+                    _fsync_directory(self.bindings_dir)
+                attachments.unlink()
+
+                _atomic_write(
+                    config,
+                    _config_to_toml(
+                        remaining_groups,
+                        self.connection_mode(),
+                    ).encode("utf-8"),
+                )
+                remaining_bindings = tuple(
+                    binding
+                    for binding in all_bindings
+                    if binding.agent not in roster
+                )
+                for project in affected_projects:
+                    self._rewrite_workspace_identity(
+                        project,
+                        (
+                            binding.agent
+                            for binding in remaining_bindings
+                            if Path(binding.project) == project
+                        ),
+                    )
+                recreated = tuple(
+                    name
+                    for name in roster
+                    if (
+                        self._agent_dir(name).exists()
+                        or self._agent_dir(name).is_symlink()
+                    )
+                )
+                if recreated:
+                    raise AgentPostError(
+                        "wipe targets were recreated before commit: "
+                        + ", ".join(recreated)
+                    )
+            except Exception as exc:
+                rollback_errors = []
+                for source, destination in reversed(staged):
+                    try:
+                        source_present = source.exists() or source.is_symlink()
+                        destination_present = (
+                            destination.exists() or destination.is_symlink()
+                        )
+                        if destination_present and source_present:
+                            rollback_errors.append(
+                                f"{source}: replacement collides with the original "
+                                f"mailbox preserved at {destination}"
+                            )
+                        elif destination_present:
+                            os.replace(destination, source)
+                        elif not source_present:
+                            rollback_errors.append(
+                                f"{source}: original mailbox is missing from "
+                                f"recovery stage {destination}"
+                            )
+                    except OSError as rollback_exc:
+                        rollback_errors.append(f"{source}: {rollback_exc}")
+                for path, contents in reversed(snapshots):
+                    try:
+                        _restore_file(path, contents)
+                    except OSError as rollback_exc:
+                        rollback_errors.append(f"{path}: {rollback_exc}")
+                try:
+                    attachments.restore()
+                except OSError as rollback_exc:
+                    rollback_errors.append(
+                        f"{attachments.path}: {rollback_exc}"
+                    )
+                if rollback_errors:
+                    try:
+                        _fsync_directory(stage)
+                        _fsync_directory(self.root)
+                    except OSError as rollback_exc:
+                        rollback_errors.append(
+                            f"{stage}: could not sync recovery stage: {rollback_exc}"
+                        )
+                    raise AgentPostError(
+                        "wipe failed and rollback was incomplete; recovery staging "
+                        f"was preserved at {stage}: "
+                        + "; ".join(rollback_errors)
+                    ) from exc
+                try:
+                    shutil.rmtree(stage)
+                except OSError as rollback_exc:
+                    raise AgentPostError(
+                        "wipe failed; rollback completed but empty staging could not "
+                        f"be removed at {stage}: {rollback_exc}"
+                    ) from exc
+                raise
+
+            try:
+                shutil.rmtree(stage)
+            except OSError as exc:
+                raise AgentPostError(
+                    f"mailboxes were detached but wipe staging remains at {stage}: {exc}"
+                ) from exc
+            _fsync_directory(self.root)
+            return roster
+        finally:
+            attachments.close()
 
     def bind_agent(self, name: str, cli: str, project: str | Path) -> Path:
         self.load_profile(name)
@@ -1340,6 +1544,220 @@ def _git_exclude_path(project: Path) -> Path | None:
     if not git.is_dir():
         return None
     return git / "info" / "exclude"
+
+
+@dataclass
+class _WipeAttachmentSet:
+    path: Path
+    descriptor: int | None
+    files: tuple[tuple[str, bytes], ...]
+
+    @classmethod
+    def prepare(
+        cls,
+        root: Path,
+        roster: tuple[str, ...],
+        *,
+        purge_all: bool,
+    ) -> _WipeAttachmentSet:
+        path = root / "runtime" / "codex-sessions"
+        try:
+            descriptor = _open_private_runtime_subdirectory(
+                root,
+                ("runtime", "codex-sessions"),
+            )
+        except FileNotFoundError:
+            return cls(path, None, ())
+        selected = []
+        try:
+            for name in sorted(os.listdir(descriptor)):
+                if not name.endswith(".json") or "/" in name or "\x00" in name:
+                    continue
+                contents = _read_private_file_at(
+                    descriptor,
+                    name,
+                    path / name,
+                )
+                if not purge_all:
+                    try:
+                        attachment_agent = str(
+                            json.loads(contents)["agent"]
+                        )
+                    except (
+                        KeyError,
+                        TypeError,
+                        UnicodeDecodeError,
+                        json.JSONDecodeError,
+                    ) as exc:
+                        raise AgentPostError(
+                            "cannot safely inspect Codex session attachment "
+                            f"{path / name}: {exc}"
+                        ) from exc
+                    if attachment_agent not in roster:
+                        continue
+                selected.append((name, contents))
+        except Exception:
+            os.close(descriptor)
+            raise
+        return cls(path, descriptor, tuple(selected))
+
+    def unlink(self) -> None:
+        if self.descriptor is None:
+            return
+        for name, _contents in self.files:
+            os.unlink(name, dir_fd=self.descriptor)
+        if self.files:
+            os.fsync(self.descriptor)
+
+    def restore(self) -> None:
+        if self.descriptor is None:
+            return
+        for name, contents in self.files:
+            _write_private_file_at(self.descriptor, name, contents)
+        if self.files:
+            os.fsync(self.descriptor)
+
+    def close(self) -> None:
+        if self.descriptor is not None:
+            os.close(self.descriptor)
+            self.descriptor = None
+
+
+def _open_private_runtime_subdirectory(
+    root: Path,
+    parts: tuple[str, ...],
+    *,
+    create: bool = False,
+) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(root, flags)
+    except OSError as exc:
+        raise AgentPostError(
+            f"cannot securely open AgentPost runtime root {root}: {exc}"
+        ) from exc
+    current = root
+    try:
+        _require_private_directory(descriptor, current)
+        for part in parts:
+            current = current / part
+            try:
+                child = os.open(part, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(
+                        part,
+                        PRIVATE_DIRECTORY_MODE,
+                        dir_fd=descriptor,
+                    )
+                except FileExistsError:
+                    pass
+                child = os.open(part, flags, dir_fd=descriptor)
+            except OSError as exc:
+                raise AgentPostError(
+                    f"cannot securely open AgentPost runtime directory "
+                    f"{current}: {exc}"
+                ) from exc
+            try:
+                _require_private_directory(child, current)
+            except Exception:
+                os.close(child)
+                raise
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _require_private_directory(descriptor: int, path: Path) -> None:
+    details = os.fstat(descriptor)
+    if (
+        not stat.S_ISDIR(details.st_mode)
+        or details.st_uid != os.geteuid()
+        or stat.S_IMODE(details.st_mode) != PRIVATE_DIRECTORY_MODE
+    ):
+        raise AgentPostError(
+            f"insecure AgentPost runtime directory ownership or permissions: {path}"
+        )
+
+
+def _read_private_file_at(
+    directory: int,
+    name: str,
+    path: Path,
+) -> bytes:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(name, flags, dir_fd=directory)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise AgentPostError(
+            f"cannot securely open AgentPost runtime file {path}: {exc}"
+        ) from exc
+    try:
+        details = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or details.st_uid != os.geteuid()
+            or stat.S_IMODE(details.st_mode) != PRIVATE_FILE_MODE
+        ):
+            raise AgentPostError(
+                f"insecure AgentPost runtime file ownership or permissions: {path}"
+            )
+        chunks = []
+        while True:
+            chunk = os.read(descriptor, 64 * 1024)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+    finally:
+        os.close(descriptor)
+
+
+def _write_private_file_at(
+    directory: int,
+    name: str,
+    contents: bytes,
+) -> None:
+    temporary = f".{name}.{uuid.uuid4().hex}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(
+        temporary,
+        flags,
+        PRIVATE_FILE_MODE,
+        dir_fd=directory,
+    )
+    try:
+        view = memoryview(contents)
+        while view:
+            written = os.write(descriptor, view)
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    try:
+        os.replace(
+            temporary,
+            name,
+            src_dir_fd=directory,
+            dst_dir_fd=directory,
+        )
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=directory)
+        except FileNotFoundError:
+            pass
 
 
 def _restore_file(path: Path, contents: bytes | None) -> None:

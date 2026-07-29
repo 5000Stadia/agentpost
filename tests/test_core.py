@@ -8,6 +8,7 @@ import threading
 import unittest
 import uuid
 from contextlib import redirect_stderr
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -24,6 +25,7 @@ from agentpost import (  # noqa: E402
     Profile,
     UnknownAgentError,
 )
+from agentpost.ownership import ConsumerLease  # noqa: E402
 
 
 def profile(name: str, cli: str = "claude") -> Profile:
@@ -67,6 +69,261 @@ class PostOfficeTest(unittest.TestCase):
         for name in ("cx", "k"):
             for directory in ("tmp", "unread", "read", "sent", "adapter"):
                 self.assertTrue((self.root / "agents" / name / directory).is_dir())
+
+    def test_profile_address_names_reserve_dot_for_project_qualification(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid agent name"):
+            profile("project.nav").validate()
+        dotted_project = replace(
+            profile("valid"),
+            projects=("project.name",),
+        )
+        with self.assertRaisesRegex(ValueError, "PROJECT.SEAT"):
+            dotted_project.validate()
+
+    def test_wipe_agents_removes_mailboxes_bindings_markers_and_group_membership(
+        self,
+    ) -> None:
+        project = Path(self.temp.name) / "shared-project"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        self.office.bind_agent("k", "claude", project)
+        self.office.set_group("team", ("cx", "k"))
+        self.office.send("cx", "k", "A copy retained by k.")
+        self.office.send("k", "cx", "A copy destroyed with cx.")
+        attachment = self.root / "runtime" / "codex-sessions" / "cx.json"
+        attachment.parent.mkdir(parents=True)
+        attachment.write_text('{"agent": "cx"}', encoding="utf-8")
+        (self.root / "runtime").chmod(0o700)
+        attachment.parent.chmod(0o700)
+        attachment.chmod(0o600)
+
+        self.assertEqual(self.office.wipe_agents(("cx",)), ("cx",))
+        self.assertFalse(attachment.exists())
+        with self.assertRaises(UnknownAgentError):
+            self.office.load_profile("cx")
+        self.assertEqual(self.office.load_profile("k").name, "k")
+        self.assertEqual(
+            tuple(binding.agent for binding in self.office.list_bindings()),
+            ("k",),
+        )
+        self.assertEqual(self.office.list_groups(), {"team": ("k",)})
+        self.assertEqual(
+            self.office.workspace_identity(project)[:2],
+            ("k", ("k",)),
+        )
+        self.assertEqual(
+            self.office.list_messages("k", "unread")[0].letter.body,
+            "A copy retained by k.",
+        )
+
+        self.assertEqual(self.office.wipe_agents(("k",)), ("k",))
+        self.assertEqual(self.office.list_profiles(), ())
+        self.assertEqual(self.office.list_bindings(), ())
+        self.assertEqual(self.office.list_groups(), {})
+        self.assertFalse((project / ".agentpost.toml").exists())
+        stale_attachment = (
+            self.root / "runtime" / "codex-sessions" / "stale.json"
+        )
+        stale_attachment.parent.mkdir(parents=True, exist_ok=True)
+        stale_attachment.write_text('{"agent": "missing"}', encoding="utf-8")
+        stale_attachment.chmod(0o600)
+        self.assertEqual(
+            self.office.wipe_agents((), purge_all_attachments=True),
+            (),
+        )
+        self.assertFalse(stale_attachment.exists())
+
+    def test_wipe_agents_rejects_attachment_directory_symlink_escape(self) -> None:
+        for scope in ("agent", "all"):
+            with self.subTest(scope=scope), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary) / "post"
+                office = PostOffice(root)
+                office.register_profile(profile("cx"))
+                external = Path(temporary) / "source-repository"
+                external.mkdir()
+                external_file = external / "release.json"
+                external_file.write_text('{"agent": "cx"}', encoding="utf-8")
+                runtime = root / "runtime"
+                runtime.mkdir(mode=0o700)
+                (runtime / "codex-sessions").symlink_to(
+                    external,
+                    target_is_directory=True,
+                )
+
+                with self.assertRaisesRegex(
+                    AgentPostError,
+                    "cannot securely open AgentPost runtime directory",
+                ):
+                    office.wipe_agents(
+                        ("cx",) if scope == "agent" else (),
+                        purge_all_attachments=scope == "all",
+                    )
+
+                self.assertEqual(office.load_profile("cx").name, "cx")
+                self.assertEqual(
+                    external_file.read_text(encoding="utf-8"),
+                    '{"agent": "cx"}',
+                )
+
+    def test_wipe_agents_rejects_permissive_attachment_directory(self) -> None:
+        runtime = self.root / "runtime"
+        attachments = runtime / "codex-sessions"
+        attachments.mkdir(parents=True)
+        runtime.chmod(0o700)
+        attachments.chmod(0o755)
+        attachment = attachments / "cx.json"
+        attachment.write_text('{"agent": "cx"}', encoding="utf-8")
+        attachment.chmod(0o600)
+
+        with self.assertRaisesRegex(
+            AgentPostError,
+            "insecure AgentPost runtime directory",
+        ):
+            self.office.wipe_agents(("cx",))
+
+        self.assertTrue(attachment.exists())
+        self.assertEqual(self.office.load_profile("cx").name, "cx")
+
+    def test_wipe_agents_rolls_back_before_irreversible_stage_cleanup(self) -> None:
+        project = Path(self.temp.name) / "rollback-project"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        self.office.set_group("team", ("cx", "k"))
+        sent = self.office.send("k", "cx", "Must survive rollback.")
+
+        with patch.object(
+            self.office,
+            "_rewrite_workspace_identity",
+            side_effect=OSError("marker unavailable"),
+        ):
+            with self.assertRaisesRegex(OSError, "marker unavailable"):
+                self.office.wipe_agents(("cx",))
+
+        self.assertEqual(self.office.load_profile("cx").name, "cx")
+        self.assertEqual(
+            self.office.read("cx", sent.message_id).letter.body,
+            "Must survive rollback.",
+        )
+        self.assertEqual(
+            tuple(binding.agent for binding in self.office.list_bindings()),
+            ("cx",),
+        )
+        self.assertEqual(self.office.list_groups(), {"team": ("cx", "k")})
+
+    def test_wipe_serializes_profile_recreation_and_consumer_startup(self) -> None:
+        project = Path(self.temp.name) / "serialized-wipe-project"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        detached = threading.Event()
+        continue_wipe = threading.Event()
+        registration_started = threading.Event()
+        profile_registered = threading.Event()
+        lease_acquired = threading.Event()
+        release_lease = threading.Event()
+        wipe_results = []
+        worker_errors = []
+        original_rewrite = self.office._rewrite_workspace_identity
+
+        def pause_after_detach(*args, **kwargs):
+            detached.set()
+            if not continue_wipe.wait(3):
+                raise AssertionError("test did not release the paused wipe")
+            return original_rewrite(*args, **kwargs)
+
+        def run_wipe() -> None:
+            try:
+                wipe_results.append(self.office.wipe_agents(("cx",)))
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        def recreate_and_consume() -> None:
+            lease = None
+            try:
+                registration_started.set()
+                self.office.register_profile(profile("cx", "codex"))
+                profile_registered.set()
+                lease = ConsumerLease(self.office, "cx", "replacement-consumer")
+                if not lease.acquire():
+                    raise AssertionError("replacement consumer did not acquire")
+                lease_acquired.set()
+                if not release_lease.wait(3):
+                    raise AssertionError("test did not release replacement lease")
+            except BaseException as exc:
+                worker_errors.append(exc)
+            finally:
+                if lease is not None:
+                    lease.release()
+
+        with patch.object(
+            self.office,
+            "_rewrite_workspace_identity",
+            side_effect=pause_after_detach,
+        ):
+            wipe_thread = threading.Thread(target=run_wipe)
+            wipe_thread.start()
+            self.assertTrue(detached.wait(3))
+
+            replacement_thread = threading.Thread(target=recreate_and_consume)
+            replacement_thread.start()
+            self.assertTrue(registration_started.wait(3))
+            self.assertFalse(profile_registered.wait(0.2))
+            self.assertFalse(lease_acquired.is_set())
+
+            continue_wipe.set()
+            wipe_thread.join(3)
+            self.assertFalse(wipe_thread.is_alive())
+
+        self.assertEqual(wipe_results, [("cx",)])
+        self.assertTrue(profile_registered.wait(3))
+        self.assertTrue(lease_acquired.wait(3))
+        release_lease.set()
+        replacement_thread.join(3)
+        self.assertFalse(replacement_thread.is_alive())
+        self.assertEqual(worker_errors, [])
+
+    def test_wipe_preserves_original_stage_on_recreated_source_collision(
+        self,
+    ) -> None:
+        project = Path(self.temp.name) / "colliding-rollback-project"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        sent = self.office.send("k", "cx", "Original mailbox must survive.")
+        original_letter = sent.recipient_path.read_bytes()
+        source = self.root / "agents" / "cx"
+        replacement_profile = (source / "profile.toml").read_bytes()
+        collision_marker = source / "replacement.txt"
+        original_rewrite = self.office._rewrite_workspace_identity
+
+        def recreate_source(*args, **kwargs):
+            result = original_rewrite(*args, **kwargs)
+            source.mkdir(mode=0o700)
+            for directory in ("tmp", "unread", "read", "sent", "adapter"):
+                (source / directory).mkdir(mode=0o700)
+            (source / "profile.toml").write_bytes(replacement_profile)
+            (source / "profile.toml").chmod(0o600)
+            collision_marker.write_text("replacement", encoding="utf-8")
+            return result
+
+        with patch.object(
+            self.office,
+            "_rewrite_workspace_identity",
+            side_effect=recreate_source,
+        ):
+            with self.assertRaisesRegex(
+                AgentPostError,
+                "recovery staging was preserved.*replacement collides",
+            ):
+                self.office.wipe_agents(("cx",))
+
+        stages = tuple(self.root.glob(".wipe-*"))
+        self.assertEqual(len(stages), 1)
+        staged_letter = stages[0] / "cx" / "unread" / sent.recipient_path.name
+        self.assertEqual(staged_letter.read_bytes(), original_letter)
+        self.assertEqual(collision_marker.read_text(encoding="utf-8"), "replacement")
+        self.assertEqual(
+            tuple(binding.agent for binding in self.office.list_bindings()),
+            ("cx",),
+        )
 
     def test_new_runtime_state_is_private_even_with_permissive_umask(self) -> None:
         root = Path(self.temp.name) / "private-post"

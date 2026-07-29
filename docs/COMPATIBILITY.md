@@ -8,8 +8,15 @@ documented migration and deprecation path.
 
 - The documented CLI commands and option meanings in the README and installation
   guide.
+- `attach` remains a session-local Codex identity operation. It must not mutate
+  durable workspace defaults or global plugin artifacts, and boundary-only
+  success must not be reported as live wake or presence.
 - Public Python names exported through `agentpost.__all__`, including
   `PostOffice`, `AgentChannel`, and `AgentRuntime`.
+- `PROJECT.SEAT` remains the explicit cross-project human address. Sender-bound
+  bare identity resolution must stay inside shared registered project entries
+  and must never fall back to another project's globally unique seat. Dot
+  remains reserved as the single qualification boundary.
 - Mailbox protocol version 1, profile version 2, binding/workspace metadata,
   and forward migration of durable unread, read, sent, profile, group, and
   binding state.
@@ -28,7 +35,14 @@ documented migration and deprecation path.
 
 Security corrections may reject input that an earlier build accepted when
 retaining that behavior would violate the documented trusted-local boundary or
-durable mailbox integrity.
+durable mailbox integrity. Rejecting formerly global cross-project bare
+delivery is such a routing-safety correction; canonical mailbox-key behavior
+remains available through the documented low-level `send` and `ask` forms.
+
+`agentpost wipe` is intentionally destructive rather than a compatibility
+migration. Broader-than-self scopes must enumerate the current target mailboxes
+and require an exact confirmation list before mutation. Wipe never expands to
+source or bridge repositories.
 
 ## Not stable
 

@@ -1,18 +1,18 @@
 # AgentPost Implementation Status
 
-Last updated: 2026-07-12
+Last updated: 2026-07-28
 
 ## Current phase
 
 The prior-art gate selected an independent literal-filesystem semantic core.
 The measured agmsg comparison and live Claude/Codex evaluation are in
-`PRIOR_ART_EVALUATION.md`. AgentPost 1.2.0 is the current stable release, with its
+`PRIOR_ART_EVALUATION.md`. AgentPost 1.3.0 is the current stable release, with its
 compatibility, security, and release contracts recorded in the repository.
 
-The local four-agent deployment now uses AgentPost as its sole actionable
-development-agent channel. Claude projects K/PB/C have the project-scoped
-`agentpost@agentpost-local` plugin generation 0.0.7; Cx uses Codex plugin
-generation `0.0.5+codex.20260712082137`, and the Python package is at 1.2.0.
+The local four-agent deployment uses AgentPost as its sole actionable
+development-agent channel. The 1.3.0 release packages Claude plugin generation
+0.0.7, Codex plugin generation `0.0.6+codex.20260728214546`, and Python package
+version 1.3.0.
 Plugin generations identify independently deployed adapter artifacts and do
 not replace the Python package's semantic version.
 Codex hook commands are stable across upgrades; a process that predates the
@@ -63,6 +63,10 @@ or the original data directories.
   executed-generation markers that never imply presence, `3/3` hook-trust
   verification, stale/unobserved/ambiguous generation diagnostics, and
   explicit approval, reinstall, and reload recovery.
+- No-restart Codex session attachment with explicit identity precedence,
+  owner-only expiring thread maps, stable-dispatch ABI negotiation, alternate
+  workspace-seat validation, boundary-only capability reporting, and
+  compatible-newer plugin preservation without downgrade.
 - Claude/Codex install, deterministic doctor, and mailbox-preserving uninstall
   commands.
 - Transactional adapter binding: failed setup records no false workspace
@@ -93,8 +97,13 @@ or the original data directories.
   delivery, ordered callback retry with visible exhaustion, async consumption,
   unread reconciliation, and non-claiming restart catch-up.
 - Human-facing channel addressing with an inspectable identity directory,
-  ambiguity-safe name/display/project/responsibility resolution, inferred
-  senders, natural named groups, and live-versus-queued delivery receipts.
+  project-filtered complete seat rosters, ambiguity-safe
+  name/display/project/responsibility resolution, inferred senders, natural
+  named groups, explicit `PROJECT.SEAT` cross-project references with no
+  global bare fallback, and live-versus-queued delivery receipts.
+- Guarded clean-start deletion for one mailbox, a complete registered project,
+  or all mailboxes. Broader scopes require an exact user-confirmed affected-box
+  list and remove only AgentPost-owned mailbox/routing state.
 - Sender-bound `AgentChannel` Python API with the same directory,
   resolve/message/question vocabulary as the CLI and direct availability as
   `AgentRuntime.channel`.
@@ -120,7 +129,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 167 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 235 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 

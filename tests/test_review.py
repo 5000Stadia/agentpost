@@ -42,6 +42,7 @@ class ReviewCommandTest(unittest.TestCase):
                 kind="role",
                 summary="Implementation reviewer",
                 roles=("code review",),
+                projects=("application",),
             )
         )
         self._git("init", "-b", "main")

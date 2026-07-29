@@ -1,4 +1,4 @@
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 from .core import (
     AgentPostError,
@@ -21,7 +21,9 @@ from .routing import (
     AgentMatch,
     find_agents,
     identify_agent,
+    project_profiles,
     project_candidates,
+    qualified_addresses,
     resolve_channel_recipients,
     resolve_group,
     resolve_identity,
@@ -74,6 +76,8 @@ __all__ = [
     "ask",
     "panel_status",
     "project_candidates",
+    "project_profiles",
+    "qualified_addresses",
     "resolve_channel_recipients",
     "resolve_group",
     "resolve_recipients",

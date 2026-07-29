@@ -7,8 +7,9 @@ even when another agent has migrated.
 
 For each agent:
 
-1. Install AgentPost, register its project identity, and run static doctor from
-   that project.
+1. Install AgentPost, verify `identities --project` support, register its
+   dot-free project aliases and seat handle, inspect the qualified address, and
+   run static doctor from that project.
 2. Send one uniquely identified acceptance request through AgentPost only.
 3. Verify that agent receives and claims the exact Message-ID, exercises
    identity/directory resolution, and returns an outbound AgentPost report that

@@ -10,7 +10,7 @@ AgentPost requires Python 3.11 or newer. Install it, register one durable
 identity, and bind that identity to the project:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.2.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/agentpost/v1.3.0/scripts/install.sh | sh
 
 agentpost profile-register my-agent \
   --display-name 'My Agent' --kind project \
@@ -87,6 +87,10 @@ channel.question(
     subject="Code Review",
 )
 ```
+
+This bare `reviewer` form assumes both profiles share a registered project
+entry. Use `other-project.reviewer` across projects; AgentPost never falls back
+from a missing local bare seat to a globally unique seat elsewhere.
 
 Neither `AgentRuntime` nor `AgentChannel` calls a model or starts a turn.
 
