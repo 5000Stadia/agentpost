@@ -75,6 +75,11 @@ compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.m
   detachment instead of trusting heartbeat-derived presence. This closes both
   lease-before-heartbeat deletion and consumer-start races; even self-wipe
   refuses an unmatched live lease.
+- Mailbox registration and wipe now share a root-level namespace lock, and wipe
+  revalidates target absence before commit. A same-name replacement cannot
+  acquire a new consumer inode while the original is staged. If an unsupported
+  direct filesystem collision prevents rollback, AgentPost preserves the
+  original recovery stage and reports its exact path instead of deleting it.
 - Ordinary Codex attachment lookup now revalidates the directory, hook event
   and stable ABI, finite coherent 30-day lifetime, initialized mailbox, and
   recorded-project reachability before selecting the attached seat.

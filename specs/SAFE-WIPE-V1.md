@@ -62,6 +62,10 @@ from the affected-box confirmation only; after closing the adapter it can be
 run from a terminal with `AGENTPOST_AGENT=NAME`. The command acquires the
 authoritative consumer leases for every target and holds those fences through
 mailbox detachment, so consumer startup cannot race a confirmed wipe.
+Profile registration and wipe also share a root-level mailbox-namespace lock.
+Supported same-name creation therefore cannot replace the staged mailbox and
+acquire a different consumer-lock inode during the transaction. Wipe
+revalidates every target's absence before commit.
 
 Codex attachment cleanup securely opens each owner-private runtime directory
 without following symlinks, validates selected files, and unlinks relative to
@@ -74,3 +78,6 @@ Successful wipe is irreversible within AgentPost. The command reports the
 removed mailbox list and states that there is no AgentPost recovery. Recovery
 requires an independent filesystem backup. Hidden staging is used only to keep
 metadata cleanup coherent if a pre-commit filesystem operation fails.
+If an unsupported direct filesystem change recreates a target and prevents
+rollback, AgentPost must not discard the staged original. It fails closed,
+retains the recovery stage, and reports that exact path for manual recovery.

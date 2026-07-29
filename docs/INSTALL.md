@@ -202,7 +202,10 @@ mailboxes affected and an exact `--confirm 'BOX1,BOX2'` rerun. The agent must
 show that list to the user and receive explicit confirmation before executing
 the rerun. A changed mailbox set invalidates stale confirmation. Other live
 mailbox consumers must be stopped first. The command acquires the authoritative
-consumer leases and holds them through mailbox detachment.
+consumer leases and holds them through mailbox detachment. Profile registration
+is serialized by the same mailbox-namespace fence; wipe revalidates target
+absence before commit. If a direct filesystem collision blocks rollback, the
+original mailbox stage is retained and its recovery path is reported.
 
 Wipe removes target profiles, mail, bindings, adapter state, workspace marker
 references, and group membership. It never removes a source or bridge

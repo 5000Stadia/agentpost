@@ -25,6 +25,7 @@ from agentpost import (  # noqa: E402
     Profile,
     UnknownAgentError,
 )
+from agentpost.ownership import ConsumerLease  # noqa: E402
 
 
 def profile(name: str, cli: str = "claude") -> Profile:
@@ -208,6 +209,121 @@ class PostOfficeTest(unittest.TestCase):
             ("cx",),
         )
         self.assertEqual(self.office.list_groups(), {"team": ("cx", "k")})
+
+    def test_wipe_serializes_profile_recreation_and_consumer_startup(self) -> None:
+        project = Path(self.temp.name) / "serialized-wipe-project"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        detached = threading.Event()
+        continue_wipe = threading.Event()
+        registration_started = threading.Event()
+        profile_registered = threading.Event()
+        lease_acquired = threading.Event()
+        release_lease = threading.Event()
+        wipe_results = []
+        worker_errors = []
+        original_rewrite = self.office._rewrite_workspace_identity
+
+        def pause_after_detach(*args, **kwargs):
+            detached.set()
+            if not continue_wipe.wait(3):
+                raise AssertionError("test did not release the paused wipe")
+            return original_rewrite(*args, **kwargs)
+
+        def run_wipe() -> None:
+            try:
+                wipe_results.append(self.office.wipe_agents(("cx",)))
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        def recreate_and_consume() -> None:
+            lease = None
+            try:
+                registration_started.set()
+                self.office.register_profile(profile("cx", "codex"))
+                profile_registered.set()
+                lease = ConsumerLease(self.office, "cx", "replacement-consumer")
+                if not lease.acquire():
+                    raise AssertionError("replacement consumer did not acquire")
+                lease_acquired.set()
+                if not release_lease.wait(3):
+                    raise AssertionError("test did not release replacement lease")
+            except BaseException as exc:
+                worker_errors.append(exc)
+            finally:
+                if lease is not None:
+                    lease.release()
+
+        with patch.object(
+            self.office,
+            "_rewrite_workspace_identity",
+            side_effect=pause_after_detach,
+        ):
+            wipe_thread = threading.Thread(target=run_wipe)
+            wipe_thread.start()
+            self.assertTrue(detached.wait(3))
+
+            replacement_thread = threading.Thread(target=recreate_and_consume)
+            replacement_thread.start()
+            self.assertTrue(registration_started.wait(3))
+            self.assertFalse(profile_registered.wait(0.2))
+            self.assertFalse(lease_acquired.is_set())
+
+            continue_wipe.set()
+            wipe_thread.join(3)
+            self.assertFalse(wipe_thread.is_alive())
+
+        self.assertEqual(wipe_results, [("cx",)])
+        self.assertTrue(profile_registered.wait(3))
+        self.assertTrue(lease_acquired.wait(3))
+        release_lease.set()
+        replacement_thread.join(3)
+        self.assertFalse(replacement_thread.is_alive())
+        self.assertEqual(worker_errors, [])
+
+    def test_wipe_preserves_original_stage_on_recreated_source_collision(
+        self,
+    ) -> None:
+        project = Path(self.temp.name) / "colliding-rollback-project"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        sent = self.office.send("k", "cx", "Original mailbox must survive.")
+        original_letter = sent.recipient_path.read_bytes()
+        source = self.root / "agents" / "cx"
+        replacement_profile = (source / "profile.toml").read_bytes()
+        collision_marker = source / "replacement.txt"
+        original_rewrite = self.office._rewrite_workspace_identity
+
+        def recreate_source(*args, **kwargs):
+            result = original_rewrite(*args, **kwargs)
+            source.mkdir(mode=0o700)
+            for directory in ("tmp", "unread", "read", "sent", "adapter"):
+                (source / directory).mkdir(mode=0o700)
+            (source / "profile.toml").write_bytes(replacement_profile)
+            (source / "profile.toml").chmod(0o600)
+            collision_marker.write_text("replacement", encoding="utf-8")
+            return result
+
+        with patch.object(
+            self.office,
+            "_rewrite_workspace_identity",
+            side_effect=recreate_source,
+        ):
+            with self.assertRaisesRegex(
+                AgentPostError,
+                "recovery staging was preserved.*replacement collides",
+            ):
+                self.office.wipe_agents(("cx",))
+
+        stages = tuple(self.root.glob(".wipe-*"))
+        self.assertEqual(len(stages), 1)
+        staged_letter = stages[0] / "cx" / "unread" / sent.recipient_path.name
+        self.assertEqual(staged_letter.read_bytes(), original_letter)
+        self.assertEqual(collision_marker.read_text(encoding="utf-8"), "replacement")
+        self.assertEqual(
+            tuple(binding.agent for binding in self.office.list_bindings()),
+            ("cx",),
+        )
 
     def test_new_runtime_state_is_private_even_with_permissive_umask(self) -> None:
         root = Path(self.temp.name) / "private-post"

@@ -391,7 +391,10 @@ AgentPost prints the sorted affected mailbox list and the exact `--confirm`
 value. Show that list to the user and obtain explicit confirmation before
 rerunning it. A changed list invalidates the confirmation, and every live
 consumer must be stopped. Wipe holds each authoritative lease fence through
-mailbox detachment.
+mailbox detachment. Profile registration shares a namespace lock with wipe, so
+same-name recreation cannot switch to a new consumer-lock inode mid-transaction.
+If an unsupported filesystem collision prevents rollback, the original mailbox
+stage is preserved and its recovery path is reported.
 
 Wipe never touches source or AgentBridge repositories. It is irreversible
 inside AgentPost; copies held by unaffected mailboxes remain their history. See

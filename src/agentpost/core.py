@@ -285,6 +285,10 @@ class PostOffice:
     def bindings_dir(self) -> Path:
         return self.root / "bindings"
 
+    @property
+    def _mailbox_namespace_lock(self) -> Path:
+        return self.root / ".mailbox-namespace.lock"
+
     def initialize(self, connection_mode: str | None = None) -> Path:
         _private_directory(self.root, parents=True)
         _private_directory(self.agents_dir)
@@ -359,14 +363,15 @@ class PostOffice:
     def register_profile(self, profile: Profile) -> Path:
         profile.validate()
         self.initialize()
-        agent_dir = self._agent_dir(profile.name)
-        _private_directory(agent_dir, parents=True)
-        for directory in MAILBOX_DIRS:
-            _private_directory(agent_dir / directory)
-        self._verify_atomic_mailbox(agent_dir)
-        path = agent_dir / "profile.toml"
-        _atomic_write(path, _profile_to_toml(profile).encode("utf-8"))
-        return path
+        with _exclusive_lock(self._mailbox_namespace_lock):
+            agent_dir = self._agent_dir(profile.name)
+            _private_directory(agent_dir, parents=True)
+            for directory in MAILBOX_DIRS:
+                _private_directory(agent_dir / directory)
+            self._verify_atomic_mailbox(agent_dir)
+            path = agent_dir / "profile.toml"
+            _atomic_write(path, _profile_to_toml(profile).encode("utf-8"))
+            return path
 
     def load_profile(self, name: str) -> Profile:
         path = self._require_agent(name) / "profile.toml"
@@ -416,6 +421,18 @@ class PostOffice:
     ) -> tuple[str, ...]:
         """Irreversibly remove complete mailboxes and their routing metadata."""
         self.initialize()
+        with _exclusive_lock(self._mailbox_namespace_lock):
+            return self._wipe_agents_locked(
+                names,
+                purge_all_attachments=purge_all_attachments,
+            )
+
+    def _wipe_agents_locked(
+        self,
+        names: Iterable[str],
+        *,
+        purge_all_attachments: bool,
+    ) -> tuple[str, ...]:
         roster = tuple(sorted(dict.fromkeys(names)))
         if not roster and not purge_all_attachments:
             raise ValueError("at least one agent is required")
@@ -505,12 +522,39 @@ class PostOffice:
                             if Path(binding.project) == project
                         ),
                     )
+                recreated = tuple(
+                    name
+                    for name in roster
+                    if (
+                        self._agent_dir(name).exists()
+                        or self._agent_dir(name).is_symlink()
+                    )
+                )
+                if recreated:
+                    raise AgentPostError(
+                        "wipe targets were recreated before commit: "
+                        + ", ".join(recreated)
+                    )
             except Exception as exc:
                 rollback_errors = []
                 for source, destination in reversed(staged):
                     try:
-                        if destination.exists() and not source.exists():
+                        source_present = source.exists() or source.is_symlink()
+                        destination_present = (
+                            destination.exists() or destination.is_symlink()
+                        )
+                        if destination_present and source_present:
+                            rollback_errors.append(
+                                f"{source}: replacement collides with the original "
+                                f"mailbox preserved at {destination}"
+                            )
+                        elif destination_present:
                             os.replace(destination, source)
+                        elif not source_present:
+                            rollback_errors.append(
+                                f"{source}: original mailbox is missing from "
+                                f"recovery stage {destination}"
+                            )
                     except OSError as rollback_exc:
                         rollback_errors.append(f"{source}: {rollback_exc}")
                 for path, contents in reversed(snapshots):
@@ -524,11 +568,25 @@ class PostOffice:
                     rollback_errors.append(
                         f"{attachments.path}: {rollback_exc}"
                     )
-                shutil.rmtree(stage, ignore_errors=True)
                 if rollback_errors:
+                    try:
+                        _fsync_directory(stage)
+                        _fsync_directory(self.root)
+                    except OSError as rollback_exc:
+                        rollback_errors.append(
+                            f"{stage}: could not sync recovery stage: {rollback_exc}"
+                        )
                     raise AgentPostError(
-                        "wipe failed and rollback was incomplete: "
+                        "wipe failed and rollback was incomplete; recovery staging "
+                        f"was preserved at {stage}: "
                         + "; ".join(rollback_errors)
+                    ) from exc
+                try:
+                    shutil.rmtree(stage)
+                except OSError as rollback_exc:
+                    raise AgentPostError(
+                        "wipe failed; rollback completed but empty staging could not "
+                        f"be removed at {stage}: {rollback_exc}"
                     ) from exc
                 raise
 
