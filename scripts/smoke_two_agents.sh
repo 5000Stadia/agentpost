@@ -18,13 +18,13 @@ AP=("$AGENTPOST_BIN" --root "$POST_ROOT")
 "${AP[@]}" profile-register agent-one \
   --display-name "Agent One" --cli python --kind project \
   --summary "Owns planning and turns requirements into implementation briefs." \
-  --projects agent-one-project --project-roots "$AGENT_ONE_ROOT" \
+  --projects agent-demo --project-roots "$AGENT_ONE_ROOT" \
   --specialties "planning,requirements" \
   --handles "implementation briefs,requirements questions" >/dev/null
 "${AP[@]}" profile-register agent-two \
   --display-name "Agent Two" --cli python --kind role \
   --summary "Provides cross-project implementation review and engineering risk analysis." \
-  --roles "code review" \
+  --roles "code review" --projects agent-demo \
   --specialties "code review,engineering risk" \
   --handles "implementation reviews,risk analysis" >/dev/null
 

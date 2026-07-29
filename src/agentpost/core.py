@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import sys
 import time
@@ -93,6 +94,12 @@ class Profile:
                 raise ValueError(f"{label} must not be empty")
         if not (self.roles or self.projects or self.specialties):
             raise ValueError("profile needs at least one role, project, or specialty")
+        dotted_projects = [value for value in self.projects if "." in value]
+        if dotted_projects:
+            raise ValueError(
+                "project names and aliases must not contain '.'; dot is reserved "
+                "for PROJECT.SEAT addresses"
+            )
 
 
 @dataclass(frozen=True)
@@ -400,6 +407,147 @@ class PostOffice:
         for path in sorted(self.agents_dir.glob("*/profile.toml")):
             profiles.append(self.load_profile(path.parent.name))
         return tuple(profiles)
+
+    def wipe_agents(
+        self,
+        names: Iterable[str],
+        *,
+        purge_all_attachments: bool = False,
+    ) -> tuple[str, ...]:
+        """Irreversibly remove complete mailboxes and their routing metadata."""
+        self.initialize()
+        roster = tuple(sorted(dict.fromkeys(names)))
+        if not roster and not purge_all_attachments:
+            raise ValueError("at least one agent is required")
+        for name in roster:
+            self.load_profile(name)
+
+        all_bindings = self.list_bindings()
+        affected_bindings = tuple(
+            binding for binding in all_bindings if binding.agent in roster
+        )
+        affected_projects = tuple(
+            sorted({Path(binding.project) for binding in affected_bindings})
+        )
+        groups = self.list_groups()
+        remaining_groups = {
+            name: members
+            for name, roster_members in groups.items()
+            if (
+                members := tuple(
+                    member for member in roster_members if member not in roster
+                )
+            )
+        }
+        binding_paths = tuple(
+            self.bindings_dir
+            / (
+                hashlib.sha256(
+                    f"{binding.cli}\0{Path(binding.project)}".encode("utf-8")
+                ).hexdigest()
+                + ".toml"
+            )
+            for binding in affected_bindings
+        )
+        config = self.root / "config.toml"
+        marker_paths = tuple(project / ".agentpost.toml" for project in affected_projects)
+        attachment_directory = self.root / "runtime" / "codex-sessions"
+        attachment_paths = []
+        for path in sorted(attachment_directory.glob("*.json")):
+            if purge_all_attachments:
+                attachment_paths.append(path)
+                continue
+            try:
+                attachment_agent = str(
+                    json.loads(path.read_text(encoding="utf-8"))["agent"]
+                )
+            except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                raise AgentPostError(
+                    f"cannot safely inspect Codex session attachment {path}: {exc}"
+                ) from exc
+            if attachment_agent in roster:
+                attachment_paths.append(path)
+        snapshots = tuple(
+            (path, path.read_bytes() if path.exists() else None)
+            for path in (
+                config,
+                *binding_paths,
+                *marker_paths,
+                *attachment_paths,
+            )
+        )
+
+        stage = self.root / f".wipe-{uuid.uuid4().hex}"
+        _private_directory(stage)
+        staged: list[tuple[Path, Path]] = []
+        try:
+            for name in roster:
+                source = self._agent_dir(name)
+                destination = stage / name
+                os.replace(source, destination)
+                staged.append((source, destination))
+            _fsync_directory(self.agents_dir)
+            _fsync_directory(stage)
+
+            for path in binding_paths:
+                path.unlink(missing_ok=True)
+            if binding_paths:
+                _fsync_directory(self.bindings_dir)
+            for path in attachment_paths:
+                path.unlink(missing_ok=True)
+            if attachment_paths:
+                _fsync_directory(attachment_directory)
+
+            _atomic_write(
+                config,
+                _config_to_toml(
+                    remaining_groups,
+                    self.connection_mode(),
+                ).encode("utf-8"),
+            )
+            remaining_bindings = tuple(
+                binding
+                for binding in all_bindings
+                if binding.agent not in roster
+            )
+            for project in affected_projects:
+                self._rewrite_workspace_identity(
+                    project,
+                    (
+                        binding.agent
+                        for binding in remaining_bindings
+                        if Path(binding.project) == project
+                    ),
+                )
+        except Exception as exc:
+            rollback_errors = []
+            for source, destination in reversed(staged):
+                try:
+                    if destination.exists() and not source.exists():
+                        os.replace(destination, source)
+                except OSError as rollback_exc:
+                    rollback_errors.append(f"{source}: {rollback_exc}")
+            for path, contents in reversed(snapshots):
+                try:
+                    _restore_file(path, contents)
+                except OSError as rollback_exc:
+                    rollback_errors.append(f"{path}: {rollback_exc}")
+            shutil.rmtree(stage, ignore_errors=True)
+            if rollback_errors:
+                raise AgentPostError(
+                    "wipe failed and rollback was incomplete: "
+                    + "; ".join(rollback_errors)
+                ) from exc
+            raise
+
+        try:
+            shutil.rmtree(stage)
+        except OSError as exc:
+            raise AgentPostError(
+                f"mailboxes were detached but wipe staging remains at {stage}: {exc}"
+            ) from exc
+        _fsync_directory(self.root)
+        return roster
 
     def bind_agent(self, name: str, cli: str, project: str | Path) -> Path:
         self.load_profile(name)

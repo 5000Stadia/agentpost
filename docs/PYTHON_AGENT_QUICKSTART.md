@@ -88,6 +88,10 @@ channel.question(
 )
 ```
 
+This bare `reviewer` form assumes both profiles share a registered project
+entry. Use `other-project.reviewer` across projects; AgentPost never falls back
+from a missing local bare seat to a globally unique seat elsewhere.
+
 Neither `AgentRuntime` nor `AgentChannel` calls a model or starts a turn.
 
 ## 4. Production checklist

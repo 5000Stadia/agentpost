@@ -118,7 +118,7 @@ class DocumentationExampleTest(unittest.TestCase):
                         cli="python",
                         kind="project",
                         summary=f"Python quick-start {name}",
-                        projects=(f"{name}-project",),
+                        projects=("python-quickstart",),
                     )
                 )
 
@@ -688,7 +688,9 @@ class DocumentationExampleTest(unittest.TestCase):
         self.assertIn("offer the user the first unused numbered mailbox", skill)
         self.assertIn("numbered identity is a separate durable mailbox", skill)
         self.assertIn("move mail already addressed to `NAME`", skill)
-        self.assertIn("cannot retroactively become an alternate identity", skill)
+        self.assertIn("agentpost attach NAME", skill)
+        self.assertIn("Do not use `join` or replace a plugin", skill)
+        self.assertIn("without publishing presence", skill)
         self.assertIn("do not describe it as live readiness", skill)
 
         generated_paths = (

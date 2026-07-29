@@ -7,6 +7,40 @@ compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.m
 
 ### Added
 
+- Project-qualified human addressing now uses the profile metadata seats
+  already register: `PROJECT.SEAT` deliberately crosses projects, while a bare
+  canonical name, display name, handle, or role resolves only among profiles
+  sharing the sender's project aliases. There is no global fallback.
+  `identities`, `profiles`, and `status` accept `--project`; mailbox inspection
+  accepts qualified addresses or a project filter; directory output includes
+  predictable qualified aliases. Canonical mailbox keys and project aliases
+  reserve dot as the single qualification boundary.
+- `agentpost wipe agent [NAME]`, `wipe project PROJECT`, and `wipe all` provide
+  clean AgentPost identity resets without touching source or bridge
+  repositories. Self-wipe is direct; every broader scope first returns the
+  exact sorted affected mailbox list and requires the same list through
+  `--confirm`. Wipe removes complete target mailboxes, bindings, workspace
+  references, adapter state, and group membership, refuses other active
+  consumers, and states that successful deletion is irreversible.
+- `agentpost attach MAILBOX` gives an already-running Codex thread an explicit,
+  expiring session identity without restarting, changing the workspace
+  default, mutating its parent environment, or touching the global plugin.
+  Compatible stable hooks and AgentPost CLI subprocesses select the attachment
+  at subsequent lifecycle boundaries. Output distinguishes `boundary-only`
+  catch-up from an existing managed `live-bridge`; attachment alone publishes
+  no presence and cannot wake an already-idle thread. Owner-only atomic state,
+  exact thread/hook evidence, workspace-seat reachability, ABI validation,
+  consumer-lease checks, expiry, and explicit-identity precedence all fail
+  closed.
+- Codex doctor reports an exact `codex-session-attachment` check separately
+  from aggregate mailbox hook-generation recovery. A working attached thread
+  is now visible as boundary-compatible even when historical session-start,
+  prompt, or stop observations still correctly require reload for full
+  generation parity.
+- Codex install negotiation now preserves a compatible newer stable-dispatch
+  plugin generation when an older runtime runs `join`, preventing an in-thread
+  replacement or downgrade. Ambiguous and incompatible changes retain the
+  terminal-only, all-sessions-closed replacement contract.
 - `agentpost upgrade` refreshes every bound adapter in one command and reports
   each binding as `current`, `upgraded`, `skipped`, or `failed`, naming which
   CLIs need a restart. Upgrading the Python package and refreshing plugin

@@ -87,7 +87,7 @@ responsibility, and group names:
 
 ```python
 result = runtime.channel.message(
-    "Pattern Buffer",
+    "pattern-buffer.pb",
     "Please review the world-state contract.",
 )
 
@@ -100,8 +100,11 @@ question = runtime.channel.question(
 For a send-only process that does not own presence or watch a mailbox, construct
 `AgentChannel("kernos-runtime")` directly. `identities()` returns the durable
 address book with current presence, and `resolve(address)` returns the concrete
-profiles without guessing tied matches. Both APIs only perform local filesystem
-operations and never invoke a model.
+profiles without guessing tied matches. `identities(project="pattern-buffer")`
+filters the directory, including offline seats. Bare addresses are restricted
+to profiles sharing the bound sender's projects; another project uses
+`PROJECT.SEAT` and never receives a global bare-name fallback. Both APIs only
+perform local filesystem operations and never invoke a model.
 
 `runtime.turn()` reference-counts concurrent work, marks the mailbox `working`
 while at least one scope remains active, and returns it to `idle` in the final

@@ -77,8 +77,9 @@ For a tested end-to-end example with two identities, two project bindings, and
 a correlated request/reply, start with [Two-agent quick start](TWO_AGENT_QUICKSTART.md).
 
 Mailbox declaration and process connection are separate operations. A mailbox
-may describe a project, role, specialist, or hybrid identity; only project and
-hybrid identities need to claim project ownership in their profile.
+may describe a project, role, specialist, or hybrid identity. Project and
+hybrid identities may claim ownership; roles and specialists list the projects
+where they are addressable without thereby owning those workspaces.
 `profile-register` creates or atomically updates the durable mailbox nameplate:
 
 ```sh
@@ -92,9 +93,11 @@ agentpost profile-register app \
 ```
 
 Canonical name, display name, project entries, and responsibility handles are
-the address-book labels accepted by `resolve`, `message`, and `question`.
-Choose handles that are specific enough to avoid collisions; AgentPost rejects
-tied labels instead of guessing.
+directory labels. Human channel commands resolve bare labels only among seats
+sharing the sender's project; use `PROJECT.SEAT` across projects. Choose a
+dot-free project alias and put a simple seat handle such as `nav`, `build`, or
+`codereview` first. AgentPost rejects tied labels instead of guessing, and
+reserves dot as the one qualifier boundary.
 
 ### Nameplate quality
 
@@ -104,7 +107,7 @@ Write a profile for the coworker trying to route work, not as an agent biography
 | --- | --- |
 | `summary` | One concise sentence naming durable ownership and the decisions, systems, or outputs the agent handles. |
 | `roles` | Broad workplace functions such as release engineering or marketing. |
-| `projects` | Stable names and aliases that users actually call the projects. |
+| `projects` | Stable dot-free names and aliases that users actually call the projects and use in `PROJECT.SEAT`. |
 | `specialties` | Specific reusable technical or domain expertise. |
 | `handles` | Two to five concrete request categories that should arrive here. |
 | `does-not-handle` | Nearby responsibilities that belong to another agent. |
@@ -121,9 +124,16 @@ queries:
 
 ```sh
 agentpost identities
+agentpost identities --project application
 agentpost agents-find 'temporal provenance' --all
 agentpost profile-register --help
 ```
+
+For example, a profile registered with projects `application,app` and first
+handle `codereview` appears as `application.codereview` and
+`app.codereview`. Bare `codereview` is local to a sender sharing one of those
+project entries. It never falls back to another project's globally unique
+seat.
 
 For the usual first connection, change to the project and run one command. The
 agent supplies its current CLI, records the adapter binding and CLI-neutral
@@ -158,6 +168,43 @@ updates and enables the local plugin; Codex reinstalls from a cache-busted local
 manifest while its three stable dispatcher commands preserve existing trust;
 Antigravity validates and reinstalls its plugin. Mail and workspace identity
 remain untouched. Reload any Codex process that predates a newly added hook.
+
+Before adopting project-qualified rollout instructions on a machine that may
+already have AgentPost, verify the capability rather than guessing from the
+presence of the binary:
+
+```sh
+agentpost identities --help | grep -q -- --project
+```
+
+If that check fails, upgrade the package before registering or messaging the
+new seats. Do not fall back to global bare handles.
+
+## Removing identities for a clean start
+
+AgentPost owns a guarded destructive workflow:
+
+```sh
+agentpost wipe agent
+agentpost wipe agent other-project.nav
+agentpost wipe project other-project
+agentpost wipe all
+```
+
+The first form wipes only the currently resolved mailbox and needs no second
+confirmation. It is the seat's final action; that session must stop using the
+identity afterwards.
+
+Every broader form performs a preview first. It prints the exact sorted
+mailboxes affected and an exact `--confirm 'BOX1,BOX2'` rerun. The agent must
+show that list to the user and receive explicit confirmation before executing
+the rerun. A changed mailbox set invalidates stale confirmation. Other live
+mailbox consumers must be stopped first.
+
+Wipe removes target profiles, mail, bindings, adapter state, workspace marker
+references, and group membership. It never removes a source or bridge
+repository. The operation is irreversible inside AgentPost; message copies
+held by unaffected mailboxes remain their history.
 
 ## Upgrading every adapter at once
 
@@ -276,9 +323,11 @@ a turn.
 agentpost install codex --agent app --project /work/application
 ```
 
-Installation removes and re-adds the local plugin and structurally merges one
-AgentPost handler into `~/.codex/hooks.json`, preserving unrelated hooks. On
-first installation, open `/hooks` and trust all three stable AgentPost hooks:
+Installation structurally merges one AgentPost handler into
+`~/.codex/hooks.json`, preserving unrelated hooks. It removes and re-adds the
+local plugin only when a generation replacement is required; a current or
+compatible newer stable-dispatch generation is preserved. On first
+installation, open `/hooks` and trust all three stable AgentPost hooks:
 `SessionStart`, `UserPromptSubmit`, and `Stop`. Later generation upgrades keep
 the same commands and therefore retain that trust. Reload a process that
 predates the prompt hook. Then:
@@ -329,6 +378,40 @@ Ordinary `codex` sessions check unread mail at startup, before every submitted
 prompt, and at turn completion without creating a polling conversation or
 claiming mail. Real-time already-idle wake, immediate active-turn steering, and
 idle deferral still require `agentpost codex`.
+
+If an already-running ordinary Codex thread resolves to the workspace default
+but should act as another known seat at that root, do not run `join` merely to
+change the live identity. Attach the current thread:
+
+```sh
+agentpost attach reviewer
+```
+
+`attach` requires `CODEX_THREAD_ID` and a compatible hook observation for that
+exact thread. It changes neither the workspace default nor
+`AGENTPOST_AGENT`, and it never installs, replaces, or downgrades the global
+plugin. Subsequent AgentPost CLI commands and lifecycle hooks select the
+attached mailbox. The result reports `boundary-only`: mail can surface on the
+next prompt/stop boundary, but an already-idle thread cannot wake. For full
+live wake, leave the thread and resume it through:
+
+```sh
+agentpost codex --agent reviewer resume THREAD_ID
+```
+
+Attachments are owner-only atomic files keyed by a hash of the thread ID,
+expire after 30 days, and do not publish presence. Explicit command or
+environment identities outrank them. A mailbox lease conflict, unreachable
+seat, incompatible hook ABI, or insecure mapping fails before identity
+mutation. The complete contract is in
+`specs/CODEX-SESSION-ATTACH-V1.md`.
+
+Inside an attached thread, `doctor` adds `codex-session-attachment` as an
+exact-thread check. It may pass while the separate aggregate
+`codex-generation` check remains stale for older session-start, prompt, or stop
+observations. Read the two lines independently: the former proves this thread's
+boundary-only identity path; the latter says a reload is still needed for
+complete mailbox hook-generation recovery.
 
 The launcher binds only to `127.0.0.1`, creates a fresh app-server for the TUI,
 and removes its active marker and child processes on exit. Its diagnostic trace

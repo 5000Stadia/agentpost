@@ -118,12 +118,14 @@ def codex_hook(event_name: str, generation: str | None = None) -> int:
         raise ValueError(f"invalid Codex hook event: {event_name}")
     event = json.load(sys.stdin)
     office = PostOffice(_runtime_root())
+    session_id = str(event.get("session_id", event.get("sessionId", "")))
     try:
         profile = identify_agent(
             office,
             event.get("cwd", Path.cwd()),
             cli="codex",
             agent=os.environ.get("AGENTPOST_AGENT"),
+            session_id=session_id,
         )
     except (AgentPostError, OSError, ValueError):
         print("{}")
@@ -135,7 +137,7 @@ def codex_hook(event_name: str, generation: str | None = None) -> int:
             "generation": generation or CODEX_HOOK_GENERATION,
             "event": event_name,
             "observed_at": time.time(),
-            "session_id": str(event.get("session_id", event.get("sessionId", ""))),
+            "session_id": session_id,
             "cwd": str(event.get("cwd", Path.cwd())),
         },
     )

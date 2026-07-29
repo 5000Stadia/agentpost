@@ -8,6 +8,7 @@ import threading
 import unittest
 import uuid
 from contextlib import redirect_stderr
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -67,6 +68,91 @@ class PostOfficeTest(unittest.TestCase):
         for name in ("cx", "k"):
             for directory in ("tmp", "unread", "read", "sent", "adapter"):
                 self.assertTrue((self.root / "agents" / name / directory).is_dir())
+
+    def test_profile_address_names_reserve_dot_for_project_qualification(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid agent name"):
+            profile("project.nav").validate()
+        dotted_project = replace(
+            profile("valid"),
+            projects=("project.name",),
+        )
+        with self.assertRaisesRegex(ValueError, "PROJECT.SEAT"):
+            dotted_project.validate()
+
+    def test_wipe_agents_removes_mailboxes_bindings_markers_and_group_membership(
+        self,
+    ) -> None:
+        project = Path(self.temp.name) / "shared-project"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        self.office.bind_agent("k", "claude", project)
+        self.office.set_group("team", ("cx", "k"))
+        self.office.send("cx", "k", "A copy retained by k.")
+        self.office.send("k", "cx", "A copy destroyed with cx.")
+        attachment = self.root / "runtime" / "codex-sessions" / "cx.json"
+        attachment.parent.mkdir(parents=True)
+        attachment.write_text('{"agent": "cx"}', encoding="utf-8")
+
+        self.assertEqual(self.office.wipe_agents(("cx",)), ("cx",))
+        self.assertFalse(attachment.exists())
+        with self.assertRaises(UnknownAgentError):
+            self.office.load_profile("cx")
+        self.assertEqual(self.office.load_profile("k").name, "k")
+        self.assertEqual(
+            tuple(binding.agent for binding in self.office.list_bindings()),
+            ("k",),
+        )
+        self.assertEqual(self.office.list_groups(), {"team": ("k",)})
+        self.assertEqual(
+            self.office.workspace_identity(project)[:2],
+            ("k", ("k",)),
+        )
+        self.assertEqual(
+            self.office.list_messages("k", "unread")[0].letter.body,
+            "A copy retained by k.",
+        )
+
+        self.assertEqual(self.office.wipe_agents(("k",)), ("k",))
+        self.assertEqual(self.office.list_profiles(), ())
+        self.assertEqual(self.office.list_bindings(), ())
+        self.assertEqual(self.office.list_groups(), {})
+        self.assertFalse((project / ".agentpost.toml").exists())
+        stale_attachment = (
+            self.root / "runtime" / "codex-sessions" / "stale.json"
+        )
+        stale_attachment.parent.mkdir(parents=True, exist_ok=True)
+        stale_attachment.write_text('{"agent": "missing"}', encoding="utf-8")
+        self.assertEqual(
+            self.office.wipe_agents((), purge_all_attachments=True),
+            (),
+        )
+        self.assertFalse(stale_attachment.exists())
+
+    def test_wipe_agents_rolls_back_before_irreversible_stage_cleanup(self) -> None:
+        project = Path(self.temp.name) / "rollback-project"
+        project.mkdir()
+        self.office.bind_agent("cx", "codex", project)
+        self.office.set_group("team", ("cx", "k"))
+        sent = self.office.send("k", "cx", "Must survive rollback.")
+
+        with patch.object(
+            self.office,
+            "_rewrite_workspace_identity",
+            side_effect=OSError("marker unavailable"),
+        ):
+            with self.assertRaisesRegex(OSError, "marker unavailable"):
+                self.office.wipe_agents(("cx",))
+
+        self.assertEqual(self.office.load_profile("cx").name, "cx")
+        self.assertEqual(
+            self.office.read("cx", sent.message_id).letter.body,
+            "Must survive rollback.",
+        )
+        self.assertEqual(
+            tuple(binding.agent for binding in self.office.list_bindings()),
+            ("cx",),
+        )
+        self.assertEqual(self.office.list_groups(), {"team": ("cx", "k")})
 
     def test_new_runtime_state_is_private_even_with_permissive_umask(self) -> None:
         root = Path(self.temp.name) / "private-post"

@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-from agentpost import AgentChannel, PostOffice, Profile  # noqa: E402
+from agentpost import AgentChannel, PostOffice, Profile, UnknownAgentError  # noqa: E402
 
 
 class AgentChannelTest(unittest.TestCase):
@@ -44,19 +44,35 @@ class AgentChannelTest(unittest.TestCase):
     def test_directory_and_resolution_include_offline_identity(self) -> None:
         identities = {identity.name: identity for identity in self.channel.identities()}
         self.assertEqual(identities["pb"].presence, "offline")
-        self.assertEqual(self.channel.resolve("Pattern Buffer")[0].name, "pb")
+        self.assertEqual(
+            identities["pb"].qualified,
+            ("pattern-buffer.pb",),
+        )
+        project_identities = self.channel.identities(project="pattern-buffer")
+        self.assertEqual(tuple(item.name for item in project_identities), ("pb",))
+        self.assertEqual(
+            self.channel.resolve("pattern-buffer.pb")[0].name,
+            "pb",
+        )
 
     def test_message_uses_bound_sender_and_human_address(self) -> None:
-        result = self.channel.message("world state storage", "Please review this.")
+        result = self.channel.message("pattern-buffer.pb", "Please review this.")
         letter = self.office.read("pb", result.message_id).letter
         self.assertEqual(letter.from_agent, "app")
         self.assertEqual(letter.kind, "letter")
 
     def test_question_uses_question_kind_and_immediate_default(self) -> None:
-        result = self.channel.question("PB", "Does this retain provenance?")
+        result = self.channel.question("pattern-buffer.pb", "Does this retain provenance?")
         letter = self.office.read("pb", result.message_id).letter
         self.assertEqual(letter.kind, "question")
         self.assertEqual(letter.notify, "immediate")
+
+    def test_bare_address_never_falls_back_to_another_project(self) -> None:
+        with self.assertRaisesRegex(
+            UnknownAgentError,
+            "cross-project addresses must use PROJECT.SEAT",
+        ):
+            self.channel.resolve("pb")
 
     def test_named_group_expands_without_at_prefix(self) -> None:
         self.office.register_profile(

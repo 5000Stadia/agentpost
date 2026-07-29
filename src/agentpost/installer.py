@@ -15,10 +15,14 @@ from pathlib import Path
 
 from .codex_generation import (
     CODEX_HOOK_GENERATION,
+    CODEX_STABLE_DISPATCH_MIN_RELEASE,
     CODEX_PLUGIN_ID,
     _installed_codex_generation,
+    codex_generation_release,
+    codex_newer_generation_is_compatible,
     codex_generation_status,
 )
+from .codex_session import load_codex_session_attachment
 from .codex_lock import CodexPluginLock
 from .core import AgentPostError, PostOffice
 from .presence import agent_presence
@@ -146,11 +150,16 @@ def install(
             codex_plan.release()
     if cli == "codex":
         try:
+            plugin_action = (
+                "refreshed the Codex plugin"
+                if codex_plan is not None and codex_plan.replace_plugin
+                else "preserved the installed Codex plugin"
+            )
             print(
-                "AgentPost refreshed the Codex plugin and user prompt hook. On first "
-                "install, open `/hooks` and trust all three stable AgentPost hooks. "
-                "Reload a process that predates the prompt hook, then complete one "
-                "prompt to verify the active generation."
+                f"AgentPost {plugin_action} and refreshed the stable user prompt "
+                "hook. On first install, open `/hooks` and trust all three stable "
+                "AgentPost hooks. Reload a process that predates the prompt hook, "
+                "then complete one prompt to verify the active generation."
             )
         except BrokenPipeError:
             pass
@@ -531,7 +540,7 @@ def _doctor_codex(
         trusted_events = set()
         trust_detail = str(exc)
     generation = codex_generation_status(office, agent)
-    return (
+    checks = [
         Check("codex-plugin", plugin.get("enabled") is True, "enabled" if plugin else "not installed"),
         Check(
             "codex-hook-trust",
@@ -540,7 +549,57 @@ def _doctor_codex(
             + ("" if len(trusted_events) == 3 else "; open `/hooks` and trust all AgentPost hooks"),
         ),
         Check("codex-node", shutil.which("node") is not None, shutil.which("node") or "not found"),
-        Check("codex-generation", generation.current, generation.detail),
+    ]
+    attachment = _codex_session_attachment_check(office, agent)
+    if attachment is not None:
+        checks.append(attachment)
+    checks.append(Check("codex-generation", generation.current, generation.detail))
+    return tuple(checks)
+
+
+def _codex_session_attachment_check(
+    office: PostOffice,
+    agent: str,
+) -> Check | None:
+    session_id = os.environ.get("CODEX_THREAD_ID")
+    if not session_id:
+        return None
+    try:
+        attachment = load_codex_session_attachment(office, session_id)
+    except (AgentPostError, OSError, ValueError) as exc:
+        return Check("codex-session-attachment", False, str(exc))
+    if attachment is None:
+        return None
+    release = codex_generation_release(attachment.observed_generation)
+    compatible = (
+        release is not None
+        and release >= CODEX_STABLE_DISPATCH_MIN_RELEASE
+    )
+    matches = attachment.agent == agent
+    installed, problem = _installed_codex_generation(Path.home())
+    installed_detail = installed or f"unknown ({problem})"
+    detail = (
+        f"thread {attachment.session_digest[:12]} attached to "
+        f"{attachment.agent}; boundary-only; "
+        f"observed {attachment.observed_generation}; "
+        f"installed {installed_detail}; aggregate mailbox hook recovery is "
+        "reported separately by codex-generation"
+    )
+    if not matches:
+        detail = (
+            f"current thread is attached to {attachment.agent}, not {agent}; "
+            + detail
+        )
+    elif not compatible:
+        detail = (
+            f"attachment hook generation {attachment.observed_generation} has "
+            "unknown or incompatible stable-dispatch ABI; "
+            + detail
+        )
+    return Check(
+        "codex-session-attachment",
+        matches and compatible,
+        detail,
     )
 
 
@@ -850,6 +909,18 @@ def _codex_install_state(home: Path) -> _CodexInstallState:
         return _CodexInstallState(
             "current", installed, f"installed generation {installed}"
         )
+    if (
+        installed is not None
+        and codex_newer_generation_is_compatible(
+            installed,
+            CODEX_HOOK_GENERATION,
+        )
+    ):
+        return _CodexInstallState(
+            "compatible-newer",
+            installed,
+            f"compatible newer generation {installed}; preserving it",
+        )
     if installed is not None:
         return _CodexInstallState(
             "upgrade", installed, f"installed generation {installed}"
@@ -913,14 +984,14 @@ def _codex_install_plan(
 ) -> _CodexInstallPlan:
     home = home or Path.home()
     state = _codex_install_state(home)
-    if state.kind == "current":
+    if state.kind in {"current", "compatible-newer"}:
         lock = CodexPluginLock(home)
         if not lock.acquire_shared():
             raise AgentPostError(
                 "Codex plugin state is changing; retry the install after it completes"
             )
         locked_state = _codex_install_state(home)
-        if locked_state.kind == "current":
+        if locked_state.kind in {"current", "compatible-newer"}:
             return _CodexInstallPlan(False, lock)
         lock.release()
         state = locked_state
@@ -937,7 +1008,7 @@ def _codex_install_plan(
         )
     try:
         locked_state = _codex_install_state(home)
-        if locked_state.kind == "current":
+        if locked_state.kind in {"current", "compatible-newer"}:
             lock.release()
             return _codex_install_plan(
                 confirm_sessions_closed=confirm_sessions_closed,

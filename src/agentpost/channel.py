@@ -6,7 +6,12 @@ from pathlib import Path
 from .core import FanoutResult, PostOffice, Profile
 from .panels import ask
 from .presence import agent_presence
-from .routing import resolve_channel_recipients, resolve_identity
+from .routing import (
+    project_profiles,
+    qualified_addresses,
+    resolve_channel_recipients,
+    resolve_identity,
+)
 from .review import prepare_review, render_review_request
 
 
@@ -16,6 +21,7 @@ class Identity:
     display_name: str
     presence: str
     summary: str
+    qualified: tuple[str, ...] = ()
 
 
 class AgentChannel:
@@ -31,15 +37,21 @@ class AgentChannel:
         self.office = office or PostOffice(root)
         self.sender = resolve_identity(self.office, sender).name
 
-    def identities(self) -> tuple[Identity, ...]:
+    def identities(self, *, project: str | None = None) -> tuple[Identity, ...]:
+        profiles = (
+            project_profiles(self.office, project)
+            if project is not None
+            else self.office.list_profiles()
+        )
         return tuple(
             Identity(
                 name=profile.name,
                 display_name=profile.display_name,
                 presence=agent_presence(self.office, profile.name).state,
                 summary=profile.summary,
+                qualified=qualified_addresses(profile),
             )
-            for profile in self.office.list_profiles()
+            for profile in profiles
         )
 
     def resolve(self, address: str) -> tuple[Profile, ...]:

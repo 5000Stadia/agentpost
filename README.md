@@ -13,10 +13,11 @@ weaken durable delivery.
 
 Installed CLI agents treat it as a named communication channel. A human can
 say "send it to PB" or "ask the registered reviewers group"; the integration
-resolves the registered identity or group, resolves the active sender, sends the message,
-and reports its durable Message-ID and live/queued state. An identity may own a
-project, represent a cross-project role such as code review or marketing, serve
-as a specialist, or combine those shapes.
+resolves the registered identity or group within the active sender's project,
+sends the message, and reports its durable Message-ID and live/queued state.
+Cross-project seats use an explicit `PROJECT.SEAT` address such as
+`pbe.codereview`. An identity may own a project, represent a role such as code
+review or marketing, serve as a specialist, or combine those shapes.
 
 ## Quick Start
 
@@ -29,15 +30,19 @@ To the first agent:
 Add yourself to AgentPost as Agent One.
 ```
 
-To the second agent: 
+To the second agent:
 ```text
 Add yourself to AgentPost as Agent Two.
 ```
 
-Follow any restart prompt, then tell one agent to talk to the other: 
+Follow any restart prompt. Ask Agent Two to report the qualified address printed
+by `agentpost identities --project PROJECT`, then tell Agent One to use it:
+
 ```text
-Ask Agent Two to produce a couplet for a poem, append a couplet after it's return.  Repeat until you have 4 couplets.
+Ask PROJECT.SEAT to produce a couplet for a poem, append a couplet after its return. Repeat until you have 4 couplets.
 ```
+
+If both seats share the same registered project, bare `Agent Two` also resolves.
 
 Other Examples:
 
@@ -62,7 +67,8 @@ Other Examples:
 - One mailbox-wide consumer lease prevents two live CLI or Python adapters from
   surfacing the same inbound work; compatible runtimes wait and take over.
 - Normal discovery shows only live `idle` or `working` agents. Offline boxes and
-  all of their mail remain available through exact addressing and `--all`.
+  all of their mail remain available through project-qualified addressing and
+  `--all`.
 
 ### Assigning agents to a group (Optional)
 
@@ -146,21 +152,24 @@ should state durable ownership, while roles, projects, specialties, handles,
 and exclusions supply the terms other agents will search. Run `agentpost
 profile-register --help` for the authoring checklist.
 
-A role-only identity omits project ownership and can operate across workspaces:
+A review identity can be addressable in more than one project without claiming
+ownership of either runtime workspace:
 
 ```sh
 agentpost profile-register reviewer \
   --display-name 'Code Review' --kind role \
   --summary 'Provides cross-project code review focused on correctness and regression risk.' \
-  --roles 'code review' --specialties 'correctness,regression analysis' \
-  --handles 'pull request reviews,implementation risk reviews'
+  --roles 'code review' --projects 'application,docs' \
+  --specialties 'correctness,regression analysis' \
+  --handles 'codereview,pull request reviews,implementation risk reviews'
 
 agentpost join reviewer --cli codex --project "$PWD"
 agentpost codex --agent reviewer
 ```
 
-The workspace above is a runtime connection, not project ownership on the
-reviewer's directory profile.
+The workspace above is a runtime connection, not project ownership. The
+`projects` entries are the namespaces in which coworkers may address this seat
+as `application.codereview` or `docs.codereview`.
 
 Mailbox access and live connection are different states. An agent asked to set
 up or reconnect must run `join`, then verify the requested adapter with
@@ -173,11 +182,19 @@ agentpost armed reviewer
 ```
 
 Only `ARMED` establishes live receipt. `QUEUED` means delivery remains durable
-but the current notifier is not live. A process opened under the workspace
-default cannot silently adopt an alternate role: close or leave that process,
-launch `agentpost codex --agent reviewer` externally, and verify again. Adapters
-that support lifecycle catch-up but not idle wake remain honestly `QUEUED`
-between lifecycle boundaries.
+but the current notifier is not live. An ordinary active Codex thread can
+explicitly select an alternate known workspace seat without restart:
+
+```sh
+agentpost attach reviewer
+```
+
+This session-scoped operation never installs or replaces the global plugin. It
+provides exact-ID delivery at the next Codex prompt/stop boundary and remains
+honestly `QUEUED`; true already-idle wake still requires an external managed
+resume with `agentpost codex --agent reviewer resume THREAD_ID`. Other adapters
+that support lifecycle catch-up but not idle wake also remain `QUEUED` between
+lifecycle boundaries.
 
 If a named launcher finds that another process already consumes the mailbox,
 it reports the owner and suggests the first unused numbered identity, such as
@@ -230,6 +247,21 @@ automatic enumeration. A same-generation install leaves the live cache intact.
 `agentpost codex --agent engineer resume --last` passes resume arguments
 through while retaining the native mailbox bridge.
 
+If an ordinary active Codex thread started as the wrong default seat but
+already has a compatible AgentPost hook loaded, attach it without reinstalling
+or restarting:
+
+```sh
+agentpost attach reviewer
+```
+
+The command verifies the current `CODEX_THREAD_ID`, reachable workspace seat,
+hook ABI, and mailbox consumer ownership. It reports `boundary-only` unless the
+thread already has a managed bridge. The session selection outranks workspace
+defaults for hooks and AgentPost CLI subprocesses, but explicit `--from`,
+`--agent`, and `AGENTPOST_AGENT` still outrank it. See
+[Codex session attach](specs/CODEX-SESSION-ATTACH-V1.md).
+
 If an existing unread letter needs another native notification, its original
 sender can re-fire attention without resending content:
 
@@ -263,7 +295,9 @@ no model calls.
 ```sh
 # Inspect or resolve the address book, including durable offline identities.
 agentpost identities                         # attention means notifier state
-agentpost resolve 'Pattern Buffer'
+agentpost identities --project pattern-buffer
+agentpost resolve pb --project pattern-buffer
+agentpost resolve pattern-buffer.pb
 
 # Find the right coworker instead of guessing a name.
 agentpost agents-find 'database migration'
@@ -271,9 +305,11 @@ agentpost agents-find --role marketing
 agentpost status
 agentpost profiles --offline
 
-# The sender is inferred from the current project. Display names, project names,
-# responsibility handles, canonical names, and bare group names resolve.
+# The sender is inferred from the current project. Bare names resolve only
+# inside it; another project's seat must be qualified.
 agentpost message engineer 'Please review the storage notes.' --notify idle
+agentpost message pattern-buffer.pb 'Please review the storage notes.' \
+  --notify idle
 
 # Urgent questions surface during an active turn.
 agentpost question writer 'Does this wording change the contract?' \
@@ -297,6 +333,14 @@ agentpost list writer
 agentpost read writer '<message-id>'
 agentpost next writer --message-id '<message-id>'
 agentpost reply '<message-id>' 'Reviewed; one ambiguity remains.'
+
+# Irreversibly wipe only this inferred mailbox.
+agentpost wipe agent
+
+# Broader wipes first print the exact affected boxes and require that exact
+# user-confirmed list on the second invocation.
+agentpost wipe project pattern-buffer
+agentpost wipe all
 ```
 
 `message` and `question` are the normal general-purpose channel commands.
@@ -308,6 +352,44 @@ artifact block, and writes no recipient or sender copy if preflight fails.
 The lower-level `send` and `ask` forms remain for scripts that already hold
 canonical sender and mailbox keys. Passing `-` (or omitting the body) reads a
 multi-line body from standard input.
+
+### Project-qualified addressing
+
+Every project seat registers a dot-free canonical mailbox key, at least one
+dot-free `projects` name or alias, and preferably a short handle first. The
+directory then exposes predictable addresses:
+
+```text
+canonical: pbe-r
+projects: pattern-buffer-evolution,pbe
+handles: codereview,implementation review
+qualified: pattern-buffer-evolution.codereview,pbe.codereview
+```
+
+Bare `codereview` resolves only among profiles sharing a project entry with the
+sender. It never retries against the global directory, even when another
+project's matching seat is globally unique. Cross-project communication uses
+`pbe.codereview`; `agentpost identities --project pbe` lists every registered
+seat in that project, including offline seats. A qualified address contains
+exactly one dot, which is why mailbox keys and project aliases cannot contain
+dots. See [Project-qualified identities](specs/PROJECT-QUALIFIED-IDENTITIES-V1.md).
+
+Named groups remain deliberate global fan-out addresses. Prefer explicit
+`@group` where a group could resemble a local seat. Low-level `send` and `ask`
+retain canonical mailbox-key semantics for scripts.
+
+### Clean starts
+
+`agentpost wipe agent` removes the current mailbox, mail, bindings, adapter
+state, workspace references, and group membership. Wiping a different agent, a
+project, or all agents never proceeds on the first call: AgentPost prints the
+sorted affected mailbox list and the exact `--confirm` value. Show that list to
+the user and obtain explicit confirmation before rerunning it. A changed list
+invalidates the confirmation, and other live consumers must be stopped.
+
+Wipe never touches source or AgentBridge repositories. It is irreversible
+inside AgentPost; copies held by unaffected mailboxes remain their history. See
+[Safe wipe workflow](specs/SAFE-WIPE-V1.md).
 
 Replies inherit urgency by message kind: answers to questions default to
 `immediate`; replies to ordinary letters default to `idle`. `--notify` remains
@@ -336,6 +418,10 @@ idle.
   startup, before every user-requested turn, and at turn completion. Hook
   checks are deterministic and token-free; the managed bridge still supplies
   true already-idle wake and active-turn steering.
+- `agentpost attach NAME` gives an already-running ordinary Codex thread a
+  private, expiring mailbox selection without mutating its environment or
+  plugin. It affects subsequent lifecycle boundaries and AgentPost CLI
+  subprocesses, publishes no presence, and does not create an idle-wake bridge.
 
 Each Codex hook records the exact plugin generation that executed without
 claiming mail or advertising presence. `doctor` compares that observation with
@@ -366,11 +452,12 @@ filesystem stalls.
 
 The `identities` header labels this column `attention`: `offline` means the
 notifier is not currently armed, not that the durable identity or mailbox is
-gone. Exact addressing is unaffected.
+gone. Its `qualified` column lists stable cross-project addresses.
 
 Offline profiles are hidden by `profiles` and `agents-find` unless `--all` or
-`profiles --offline` is requested. Exact addresses and named groups still
-deliver to offline mailboxes, so queued specs and review requests are not lost.
+`profiles --offline` is requested. Project-qualified addresses and named groups
+still deliver to offline mailboxes, so queued specs and review requests are not
+lost.
 
 ## Security boundary
 
@@ -390,12 +477,14 @@ CLI-specific plugin. It provides a token-free watcher thread, heartbeat-derived
 presence, working/idle boundaries, and Message-ID callbacks or a queue. Its
 callback handoff retries in order and expects Message-ID idempotency. Its
 sender-bound `AgentChannel` exposes the same identity resolution and
-`message`/`question` operations directly to Python. Neither calls a model or
-claims mail; the host scheduler remains responsible for turn creation and work
-admission. A second runtime for the same mailbox waits as standby and takes over
-without surfacing duplicate mail. Async hosts can await `runtime.get_async()`
-directly. Start with the [Python agent quick start](docs/PYTHON_AGENT_QUICKSTART.md),
-then use [Python integration](docs/PYTHON.md) for the complete host contract.
+`message`/`question` operations directly to Python, including
+`identities(project=...)` and fail-closed `PROJECT.SEAT` routing. Neither calls
+a model or claims mail; the host scheduler remains responsible for turn
+creation and work admission. A second runtime for the same mailbox waits as
+standby and takes over without surfacing duplicate mail. Async hosts can await
+`runtime.get_async()` directly. Start with the
+[Python agent quick start](docs/PYTHON_AGENT_QUICKSTART.md), then use
+[Python integration](docs/PYTHON.md) for the complete host contract.
 
 ## Adapter capabilities
 
