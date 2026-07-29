@@ -625,7 +625,7 @@ class JoinCommandTest(unittest.TestCase):
 
     def test_wipe_holds_consumer_fence_through_mailbox_detach(self) -> None:
         contender = ConsumerLease(self.office, "pb", "late-consumer")
-        original = PostOffice.wipe_agents
+        original = PostOffice._wipe_agents_locked
 
         def guarded_wipe(office, names, **kwargs):
             self.assertFalse(contender.acquire())
@@ -633,10 +633,10 @@ class JoinCommandTest(unittest.TestCase):
 
         with patch.object(
             PostOffice,
-            "wipe_agents",
+            "_wipe_agents_locked",
             autospec=True,
             side_effect=guarded_wipe,
-        ):
+        ) as locked_wipe:
             with patch.dict(
                 os.environ,
                 {"AGENTPOST_AGENT": "app"},
@@ -656,6 +656,7 @@ class JoinCommandTest(unittest.TestCase):
                     )
 
         self.assertEqual(result, 0)
+        self.assertEqual(locked_wipe.call_count, 1)
         with self.assertRaises(UnknownAgentError):
             contender.acquire()
         self.assertFalse((self.root / "agents" / "pb").exists())
