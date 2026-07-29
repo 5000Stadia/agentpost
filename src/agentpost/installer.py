@@ -542,6 +542,7 @@ def _doctor_codex(
     generation = codex_generation_status(office, agent)
     checks = [
         Check("codex-plugin", plugin.get("enabled") is True, "enabled" if plugin else "not installed"),
+        _codex_expected_generation_check(),
         Check(
             "codex-hook-trust",
             len(trusted_events) == 3,
@@ -555,6 +556,45 @@ def _doctor_codex(
         checks.append(attachment)
     checks.append(Check("codex-generation", generation.current, generation.detail))
     return tuple(checks)
+
+
+def _codex_expected_generation_check() -> Check:
+    installed, problem = _installed_codex_generation(Path.home())
+    if installed == CODEX_HOOK_GENERATION:
+        return Check(
+            "codex-plugin-generation",
+            True,
+            f"installed expected generation {installed}",
+        )
+    if (
+        installed is not None
+        and codex_newer_generation_is_compatible(
+            installed,
+            CODEX_HOOK_GENERATION,
+        )
+    ):
+        return Check(
+            "codex-plugin-generation",
+            True,
+            f"compatible newer generation {installed}; preserving it",
+        )
+    if installed is None:
+        detail = (
+            f"installed generation unknown ({problem}); expected "
+            f"{CODEX_HOOK_GENERATION}"
+        )
+    else:
+        detail = (
+            f"installed generation {installed}; expected "
+            f"{CODEX_HOOK_GENERATION}"
+        )
+    return Check(
+        "codex-plugin-generation",
+        False,
+        detail
+        + "; close all Codex sessions and run `agentpost upgrade --cli codex "
+        "--confirm-codex-sessions-closed` from a terminal",
+    )
 
 
 def _codex_session_attachment_check(

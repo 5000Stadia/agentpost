@@ -52,6 +52,7 @@ from agentpost.installer import (  # noqa: E402
     Check,
     _claude_plugin_version,
     _doctor_claude,
+    _doctor_codex,
     _install_codex_user_hook,
     _integration_source,
     _package_check,
@@ -886,6 +887,44 @@ lease.release()
         generation, problem = _installed_codex_generation(home)
         self.assertIsNone(generation)
         self.assertIn("malformed", problem)
+
+    def test_codex_doctor_and_upgrade_detect_package_plugin_generation_drift(
+        self,
+    ) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "generation-drift-project"
+        project.mkdir()
+        office.bind_agent("cx", "codex", project)
+        home = Path(self.temp.name) / "generation-drift-home"
+        installed = "0.0.5+codex.20260712082137"
+        self._write_codex_install(home, installed)
+        for event in ("session-start", "user-prompt-submit", "stop"):
+            self._write_codex_observation(office, event, installed)
+
+        with patch("agentpost.installer.Path.home", return_value=home):
+            with patch("agentpost.installer._list_codex_hooks", return_value=[]):
+                with patch(
+                    "agentpost.installer._trusted_agentpost_hooks",
+                    return_value=({"sessionStart", "userPromptSubmit", "stop"}, ()),
+                ):
+                    with patch(
+                        "agentpost.installer.shutil.which",
+                        return_value="/usr/bin/node",
+                    ):
+                        checks = {
+                            check.name: check
+                            for check in _doctor_codex(office, "cx", project)
+                        }
+                        preview = upgrade(office, cli="codex", dry_run=True)
+
+        self.assertTrue(checks["codex-generation"].ok)
+        expected = checks["codex-plugin-generation"]
+        self.assertFalse(expected.ok)
+        self.assertIn(f"installed generation {installed}", expected.detail)
+        self.assertIn(f"expected {CODEX_HOOK_GENERATION}", expected.detail)
+        self.assertEqual(len(preview), 1)
+        self.assertEqual(preview[0].state, "would-upgrade")
+        self.assertIn(f"expected {CODEX_HOOK_GENERATION}", preview[0].detail)
 
     def _write_codex_install(self, home: Path, generation: str) -> None:
         config = home / ".codex" / "config.toml"

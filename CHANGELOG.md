@@ -62,6 +62,11 @@ compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.m
 
 ### Fixed
 
+- Codex doctor and `agentpost upgrade --dry-run` now compare the installed
+  plugin generation with the running package's expected generation. A fully
+  observed older cache no longer reports `CURRENT` merely because its own
+  historical hooks agree with it; the preview names the required
+  all-sessions-closed replacement before the real upgrade is attempted.
 - `agentpost reply MESSAGE_ID` with an inferred sender now answers from the
   seat that actually holds the letter, instead of always acting as the single
   workspace default. A runtime notified as an alternate seat sharing the
