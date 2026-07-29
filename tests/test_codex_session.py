@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from agentpost import AgentPostError, PostOffice, Profile  # noqa: E402
 from agentpost.cli import main  # noqa: E402
 from agentpost.codex_generation import (  # noqa: E402
+    CODEX_HOOK_GENERATION,
     codex_hook_marker,
     codex_newer_generation_is_compatible,
 )
@@ -61,7 +62,7 @@ class CodexSessionAttachTest(unittest.TestCase):
         self.office.bind_agent("pbeocx", "codex", self.project)
         self.thread_id = "019-codex-thread"
         self._observe(self.thread_id, "0.0.4+codex.20260701000000")
-        self._install_generation("0.0.5+codex.20260712082137")
+        self._install_generation(CODEX_HOOK_GENERATION)
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -146,7 +147,7 @@ class CodexSessionAttachTest(unittest.TestCase):
         )
         self.assertEqual(
             result.installed_generation,
-            "0.0.5+codex.20260712082137",
+            CODEX_HOOK_GENERATION,
         )
         self.assertEqual(
             before,
@@ -425,7 +426,7 @@ class CodexSessionAttachTest(unittest.TestCase):
     ) -> None:
         self._observe(
             self.thread_id,
-            "0.0.5+codex.20260712082137",
+            CODEX_HOOK_GENERATION,
             observed_at=200.0,
         )
         self._attach()
@@ -462,7 +463,7 @@ class CodexSessionAttachTest(unittest.TestCase):
         self.assertTrue(attached.ok)
         self.assertIn("boundary-only", attached.detail)
         self.assertIn("thread ", attached.detail)
-        self.assertIn("observed 0.0.5+codex", attached.detail)
+        self.assertIn("observed 0.0.6+codex", attached.detail)
         self.assertIn("reported separately", attached.detail)
         aggregate = checks["codex-generation"]
         self.assertFalse(aggregate.ok)

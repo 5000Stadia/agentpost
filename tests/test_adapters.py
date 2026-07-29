@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from agentpost import (  # noqa: E402
+    __version__,
     AgentPostError,
     BoundaryBell,
     MailboxWatcher,
@@ -1872,7 +1873,11 @@ lease.release()
 
     def _antigravity_checks(self, office, agent, project):
         with patch("agentpost.installer._doctor_antigravity", return_value=()):
-            return doctor(office, agent, project, cli="antigravity")
+            with patch(
+                "agentpost.installer.importlib.metadata.version",
+                return_value=__version__,
+            ):
+                return doctor(office, agent, project, cli="antigravity")
 
     def _bound_antigravity_project(self, office, agent: str) -> Path:
         project = Path(self.temp.name) / f"{agent}-project"

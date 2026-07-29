@@ -5,6 +5,8 @@ compatibility surface is defined in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.m
 
 ## Unreleased
 
+## [1.3.0] - 2026-07-28
+
 ### Added
 
 - Project-qualified human addressing now uses the profile metadata seats
@@ -183,6 +185,7 @@ First stable release.
 - Published bootstrap commands and the default installer source are pinned to
   the versioned `v1.0.0` release tag.
 
+[1.3.0]: https://github.com/5000Stadia/agentpost/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/5000Stadia/agentpost/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/5000Stadia/agentpost/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/5000Stadia/agentpost/releases/tag/v1.0.0

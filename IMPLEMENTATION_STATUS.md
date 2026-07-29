@@ -6,13 +6,13 @@ Last updated: 2026-07-28
 
 The prior-art gate selected an independent literal-filesystem semantic core.
 The measured agmsg comparison and live Claude/Codex evaluation are in
-`PRIOR_ART_EVALUATION.md`. AgentPost 1.2.0 is the current stable release, with its
+`PRIOR_ART_EVALUATION.md`. AgentPost 1.3.0 is the current stable release, with its
 compatibility, security, and release contracts recorded in the repository.
 
-The local four-agent deployment now uses AgentPost as its sole actionable
-development-agent channel. Claude projects K/PB/C have the project-scoped
-`agentpost@agentpost-local` plugin generation 0.0.7; Cx uses Codex plugin
-generation `0.0.5+codex.20260712082137`, and the Python package is at 1.2.0.
+The local four-agent deployment uses AgentPost as its sole actionable
+development-agent channel. The 1.3.0 release packages Claude plugin generation
+0.0.7, Codex plugin generation `0.0.6+codex.20260728214546`, and Python package
+version 1.3.0.
 Plugin generations identify independently deployed adapter artifacts and do
 not replace the Python package's semantic version.
 Codex hook commands are stable across upgrades; a process that predates the
@@ -129,7 +129,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 ```
 
-The current suite contains 214 passing tests. Twenty consecutive pre-Antigravity
+The current suite contains 224 passing tests. Twenty consecutive pre-Antigravity
 full-suite runs passed after the concurrency and UTF-8 fixes. A clean Python
 virtual environment editable install and executable smoke test also passed.
 

@@ -1,6 +1,6 @@
 # AgentPost Roadmap
 
-Last reviewed: 2026-07-12
+Last reviewed: 2026-07-28
 
 AgentPost v1.0.0 freezes the trusted-local filesystem core, Claude Code, Codex,
 Antigravity lifecycle, and CLI-neutral Python integration contracts. This file
@@ -35,6 +35,12 @@ agent sessions in separate contexts, not third-party review.
 AgentPost 1.1.0 adds fail-closed immutable repository-review envelopes and
 closes the answered-but-unread reply lifecycle defect without changing the
 trusted-local architecture.
+
+AgentPost 1.3.0 adds no-restart Codex seat attachment, project-qualified
+cross-project addressing with fail-closed bare-name scope, project-filtered
+directory views, guarded agent/project/all cleanup, and adapter-wide upgrade
+orchestration. These remain within the trusted-local 1.x compatibility
+boundary.
 
 ## Antigravity CLI integration
 
@@ -92,15 +98,14 @@ but it is not scheduled.
   must be durable before this can work across process restarts.
 - **Machine-readable capability report:** expose adapter support and degraded
   behavior in structured output, especially for catch-up-only integrations.
-- **Adapter attach and generation truth:** the Codex slice is done: all three
-  lifecycle hooks stamp the exact executing generation before injection
-  suppression, doctor compares it with the enabled cache and Codex's current
-  hook trust, and stable dispatcher commands preserve first-install approval
-  across upgrades while naming the reload boundary. Sweep Claude and
-  Antigravity next, using the same running-versus-installed vocabulary and
-  distinguishing failed `immediate` interruption from routine queued delivery.
-  Python already exposes live runtime-instance ownership rather than a plugin
-  generation.
+- **Generation truth beyond Codex:** all three Codex lifecycle hooks stamp the
+  exact executing generation before injection suppression, doctor compares it
+  with the enabled cache and current hook trust, and stable dispatcher commands
+  preserve first-install approval across upgrades while naming the reload
+  boundary. Sweep Claude and Antigravity next, using the same
+  running-versus-installed vocabulary and distinguishing failed `immediate`
+  interruption from routine queued delivery. Python already exposes live
+  runtime-instance ownership rather than a plugin generation.
 - **Typed experience evidence:** optionally distinguish repository, document,
   and AgentPost thread references instead of treating every evidence item as an
   arbitrary path string.
