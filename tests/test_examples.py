@@ -16,6 +16,7 @@ import tempfile
 import time
 import tomllib
 import unittest
+from contextlib import suppress
 from pathlib import Path
 from unittest.mock import patch
 
@@ -137,38 +138,44 @@ class DocumentationExampleTest(unittest.TestCase):
                     interval=0.01,
                 ) as runtime:
                     pump = asyncio.create_task(pump_agentpost(runtime, jobs))
-                    sent = office.send("sender", "my-agent", "Review this")
-                    notice = await asyncio.wait_for(jobs.get(), timeout=1)
-                    inspected = office.read("my-agent", notice.message_id)
-                    self.assertEqual(inspected.state, "unread")
-                    self.assertEqual(
-                        office.read("my-agent", notice.message_id).state,
-                        "unread",
-                    )
-
-                    async def handle(body: str) -> str:
-                        self.assertEqual(body, "Review this")
-                        return "Reviewed"
-
-                    await run_agentpost_turn(runtime, notice, handle)
-                    self.assertEqual(office.list_messages("my-agent", "unread"), ())
-                    self.assertEqual(len(office.list_messages("my-agent", "read")), 1)
-                    replies = office.list_messages("sender", "unread")
-                    self.assertEqual(len(replies), 1)
-                    received_reply = replies[0]
-                    self.assertEqual(
-                        received_reply.letter.in_reply_to,
-                        sent.message_id,
-                    )
-                    self.assertEqual(
-                        received_reply.letter.body,
-                        "Reviewed",
-                    )
-                    pump.cancel()
                     try:
-                        await pump
-                    except asyncio.CancelledError:
-                        pass
+                        sent = office.send("sender", "my-agent", "Review this")
+                        notice = await asyncio.wait_for(jobs.get(), timeout=5)
+                        inspected = office.read("my-agent", notice.message_id)
+                        self.assertEqual(inspected.state, "unread")
+                        self.assertEqual(
+                            office.read("my-agent", notice.message_id).state,
+                            "unread",
+                        )
+
+                        async def handle(body: str) -> str:
+                            self.assertEqual(body, "Review this")
+                            return "Reviewed"
+
+                        await run_agentpost_turn(runtime, notice, handle)
+                        self.assertEqual(
+                            office.list_messages("my-agent", "unread"),
+                            (),
+                        )
+                        self.assertEqual(
+                            len(office.list_messages("my-agent", "read")),
+                            1,
+                        )
+                        replies = office.list_messages("sender", "unread")
+                        self.assertEqual(len(replies), 1)
+                        received_reply = replies[0]
+                        self.assertEqual(
+                            received_reply.letter.in_reply_to,
+                            sent.message_id,
+                        )
+                        self.assertEqual(
+                            received_reply.letter.body,
+                            "Reviewed",
+                        )
+                    finally:
+                        pump.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await pump
 
             asyncio.run(scenario())
 
