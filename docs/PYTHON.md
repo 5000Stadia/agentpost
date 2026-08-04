@@ -156,6 +156,14 @@ A notification contains only routing data and the immutable spool path:
 - `kind`
 - `notify`
 - `path`
+- `origin`: `startup`, `live`, or `snapshot`
+
+The first batch after a runtime acquires the mailbox lease uses
+`origin="startup"`. Interactive hosts should present that batch as a user
+consent gate rather than enqueue model work immediately. `AgentRuntime` remains
+transport-only: it does not ask the user, call a model, inspect content, or
+claim mail. Later batches use `origin="live"`; side-effect-free reconciliation
+through `runtime.unread()` uses `origin="snapshot"`.
 
 The application may inspect with `PostOffice.read()` and must call
 `PostOffice.claim()` only when it actually starts the work. This preserves the

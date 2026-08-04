@@ -10,7 +10,7 @@ from .core import PostOffice
 
 
 CODEX_PLUGIN_ID = "agentpost@agentpost-local"
-CODEX_HOOK_GENERATION = "0.0.6+codex.20260728214546"
+CODEX_HOOK_GENERATION = "0.0.7+codex.20260804015728"
 CODEX_HOOK_EVENTS = ("session-start", "user-prompt-submit", "stop")
 CODEX_STABLE_DISPATCH_MIN_RELEASE = (0, 0, 3)
 _CODEX_GENERATION_RE = re.compile(

@@ -213,3 +213,15 @@ counts; later responses remain visible as duplicates.
 Notification adapters receive only committed Message-IDs. Adapter failure does
 not roll back delivery, and adapter state is never authoritative for unread
 state. Adapter activation always catches up from the full current unread set.
+Interactive adapters surface that startup snapshot as a consent gate: they
+announce the mailbox and exact pending set but prohibit inspection, claim,
+reply, or work until the user chooses to read now, reload or rebind first, or
+defer. An attention-request record may be acknowledged when the gate is
+delivered; the durable message remains unread and is gated again after a
+runtime reload.
+
+Consumer ownership and heartbeat presence are independent evidence. A fresh
+matching heartbeat plus a held lease is live; a stopped owner holding the lease
+is `suspended`; a running owner with a stale heartbeat is `unresponsive`.
+Neither recovery state is treated as an offline/free mailbox or as a reason to
+create a parallel numbered identity.

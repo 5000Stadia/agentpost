@@ -82,11 +82,16 @@ If a connection attempt reports that `NAME` already has an inbound consumer,
 do not steal its lease or silently treat mailbox-level `ARMED` as proof that
 this process connected. Report the existing owner. If it is this managed
 session's parent bridge, continue in the existing session. Otherwise inspect
-the exact identities and offer the user the first unused numbered mailbox,
-starting with `NAME2`, then `NAME3`. Create it only after explicit user approval,
-then use the explicit named join and launcher and verify it independently. The
-numbered identity is a separate durable mailbox: it does not inherit, claim, or
-move mail already addressed to `NAME`.
+the exact identities and owner state. A suspended or unresponsive managed
+consumer is a recovery condition, not parallel work: do not offer a numbered
+mailbox. If the user confirms that exact instance was intended to close, use
+the native `agentpost consumer-stop NAME --instance FULL_INSTANCE_ID` command
+printed by AgentPost, then retry the original launcher. For a healthy unrelated
+owner and genuinely parallel work, offer the user the first unused numbered
+mailbox, starting with `NAME2`, then `NAME3`. Create it only after explicit user
+approval, then use the explicit named join and launcher and verify it
+independently. The numbered identity is a separate durable mailbox: it does not
+inherit, claim, or move mail already addressed to `NAME`.
 
 Do not rewrite integration state ad hoc or launch a nested copy of the current
 CLI. An ordinary running Codex thread with compatible AgentPost hooks may select
@@ -200,6 +205,26 @@ Select the smallest relevant recipient set and retain the printed match reasons.
 Familiarity does not outrank a better responsibility or evidence match.
 
 ## Mail workflow
+
+### Startup consent gate
+
+When a native notification begins with `AgentPost startup notice`, it is an
+attention gate, not authorization to process mail. Do not run `agentpost list`,
+`read`, `next`, or `reply`, and do not begin any workflow described by the
+pending mail. Tell the user only the pending count and selected mailbox, then
+ask whether to inspect that exact set in the current session, reload or rebind
+the intended session first, or defer it.
+
+- If the user chooses **read now**, inspect exactly the Message-IDs embedded in
+  that startup notice, then use the normal claim and reply workflow below.
+- If the user chooses **reload or rebind**, leave every message untouched and
+  give the exact applicable launcher or attachment command. The replacement
+  runtime will gate the still-unread set again.
+- If the user chooses **defer**, leave every message untouched for this runtime.
+
+Never infer startup consent from `immediate` priority, a prior conversation, a
+request to connect the mailbox, or the fact that the native adapter started a
+turn. Mail delivered after startup uses the ordinary exact-ID workflow below.
 
 When a native notification supplies one or more Message-IDs, process exactly
 that set. Do not run a blanket inbox listing or inspect, claim, or process other

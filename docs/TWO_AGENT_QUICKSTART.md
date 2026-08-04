@@ -117,8 +117,9 @@ agentpost doctor agent-one --project "$PWD" --cli claude
 
 Restart or reload the Claude project session after `join`. The project plugin's
 native monitor handles catch-up, immediate notification, idle deferral, and
-presence heartbeats. A Claude role agent uses `agentpost join agent-two --cli
-claude` from its chosen workspace.
+presence heartbeats. If queued mail exists on that fresh load, the monitor asks
+whether to inspect it now, reload or rebind first, or defer it. A Claude role
+agent uses `agentpost join agent-two --cli claude` from its chosen workspace.
 
 ### Codex
 
@@ -135,7 +136,8 @@ Codex process that predates the prompt hook, then submit and complete one prompt
 so `doctor` can verify the active generation. Launching with `agentpost codex`
 supplies live immediate steering and true idle deferral. An ordinary Codex
 launch checks at startup, before each prompt, and at turn completion but does
-not provide already-idle wake.
+not provide already-idle wake. Both paths gate queued startup mail before any
+inspection command is offered.
 
 ### Embedded Python
 
@@ -167,8 +169,9 @@ agentpost antigravity --agent agent-two
 ```
 
 Restart `agy` after the first `join`. Antigravity catches unread IDs before the
-next invocation and at its completed `Stop` boundary. Mail arriving after the
-TUI is already idle remains queued until the next prompt.
+next invocation and at its completed `Stop` boundary. Its first snapshot asks
+whether to inspect, reload or rebind, or defer; mail arriving after the TUI is
+already idle remains queued until the next prompt.
 
 ## 5. Tell them to talk
 
@@ -212,11 +215,13 @@ print(result.message_id)
 
 The native monitor wakes the project session with the exact Message-ID. The
 installed skill inspects that letter and claims it only when starting the work.
+On fresh startup, it asks for consent before that inspection workflow.
 
 ### Codex
 
 The app-server bridge starts or steers the turn with the exact Message-ID. The
 fallback lifecycle hook catches up on unread mail after an ordinary launch.
+Queued startup mail is announced through the same consent gate before reading.
 
 ### Embedded Python
 
@@ -228,7 +233,8 @@ admitted.
 
 The plugin injects the exact Message-ID at the next invocation or completed
 turn boundary. It never claims mail. Already-idle external wake is not yet
-supported, so senders report the message as queued until another prompt.
+supported, so senders report the message as queued until another prompt. A
+fresh host process gates its initial unread snapshot before inspection.
 
 ### Portable CLI workflow
 

@@ -9,7 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
@@ -992,6 +992,32 @@ class JoinCommandTest(unittest.TestCase):
             "not a persistent monitor",
         ):
             self.assertIn(phrase, help_text)
+
+    def test_consumer_stop_requires_and_reports_one_exact_instance(self) -> None:
+        owner = {
+            "adapter": "codex",
+            "pid": 1234,
+            "instance_id": "exact-instance",
+        }
+        output = StringIO()
+        with patch("agentpost.cli.stop_managed_consumer", return_value=owner) as stop:
+            with redirect_stdout(output):
+                result = main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "consumer-stop",
+                        "app",
+                        "--instance",
+                        "exact-instance",
+                    ]
+                )
+        self.assertEqual(result, 0)
+        stop.assert_called_once_with(ANY, "app", "exact-instance")
+        self.assertEqual(
+            output.getvalue().strip(),
+            "STOPPED\tapp\tcodex\tpid=1234\tinstance=exact-instance",
+        )
 
 
 if __name__ == "__main__":

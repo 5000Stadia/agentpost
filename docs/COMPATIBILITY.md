@@ -13,6 +13,8 @@ documented migration and deprecation path.
   success must not be reported as live wake or presence.
 - Public Python names exported through `agentpost.__all__`, including
   `PostOffice`, `AgentChannel`, and `AgentRuntime`.
+- `Notification.origin` is additive routing metadata. Existing positional
+  construction remains valid because it defaults to `live`.
 - `PROJECT.SEAT` remains the explicit cross-project human address. Sender-bound
   bare identity resolution must stay inside shared registered project entries
   and must never fall back to another project's globally unique seat. Dot

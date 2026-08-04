@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 
 from .core import AgentPostError, PostOffice
+from .ownership import consumer_lock_held, consumer_process_state
 
 
 HEARTBEAT_INTERVAL_SECONDS = 1.0
@@ -24,7 +25,7 @@ class Presence:
 
     @property
     def active(self) -> bool:
-        return self.state != "offline"
+        return self.state in {"idle", "working"}
 
 
 def agent_presence(office: PostOffice, agent: str) -> Presence:
@@ -36,7 +37,8 @@ def agent_presence(office: PostOffice, agent: str) -> Presence:
         raise AgentPostError(f"unknown agent: {agent}") from exc
 
     adapter_dir = office.root / "agents" / agent / "adapter"
-    owner = _consumer_owner(adapter_dir)
+    lock_held = consumer_lock_held(adapter_dir / "consumer.lock")
+    owner = _consumer_owner(adapter_dir) if lock_held else {}
     probes = (
         _claude_presence(adapter_dir),
         _codex_presence(adapter_dir),
@@ -45,6 +47,8 @@ def agent_presence(office: PostOffice, agent: str) -> Presence:
     )
     active = [item for item in probes if item.active and _matches_owner(item, owner)]
     if not active:
+        if lock_held:
+            return _blocked_consumer_presence(owner)
         connected = sorted(
             {
                 binding.cli
@@ -227,7 +231,37 @@ def _consumer_owner(adapter) -> dict:
         pid = int(value["pid"])
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
         return {}
-    return value if _pid_alive(pid) else {}
+    return value
+
+
+def _blocked_consumer_presence(owner: dict) -> Presence:
+    adapter = str(owner.get("adapter", "unknown"))
+    instance_id = owner.get("instance_id")
+    try:
+        pid = int(owner["pid"])
+    except (KeyError, TypeError, ValueError):
+        pid = 0
+    process_state = consumer_process_state(pid)
+    if process_state in {"T", "t"}:
+        state = "suspended"
+        reason = "is suspended and still holds the inbound lease"
+    elif process_state is not None and process_state not in {"Z", "X", "x"}:
+        state = "unresponsive"
+        reason = "holds the inbound lease but its heartbeat is stale"
+    else:
+        state = "incoherent"
+        reason = "holds the inbound lease but its owner process is unverifiable"
+    detail = f"{adapter} consumer pid {pid or '?'} {reason}"
+    if instance_id:
+        detail += f"; instance {instance_id}"
+    return Presence(
+        state,
+        detail,
+        healthy=False,
+        adapter=adapter,
+        instance_id=str(instance_id) if instance_id else None,
+        wake_capable=False,
+    )
 
 
 def _matches_owner(presence: Presence, owner: dict) -> bool:
