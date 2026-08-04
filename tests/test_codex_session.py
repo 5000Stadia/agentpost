@@ -213,7 +213,11 @@ class CodexSessionAttachTest(unittest.TestCase):
         instruction = json.loads(output.getvalue())["hookSpecificOutput"][
             "additionalContext"
         ]
-        self.assertIn(f"for pbeocx: {sent.message_id}", instruction)
+        self.assertIn("AgentPost startup notice", instruction)
+        self.assertIn("mailbox pbeocx", instruction)
+        self.assertIn(sent.message_id, instruction)
+        self.assertIn("ask whether to inspect", instruction)
+        self.assertNotIn("agentpost read", instruction)
         self.assertEqual(len(self.office.list_messages("pbeocx", "unread")), 1)
         observed = json.loads(
             codex_hook_marker(
@@ -534,7 +538,7 @@ class CodexSessionAttachTest(unittest.TestCase):
         self.assertTrue(attached.ok)
         self.assertIn("boundary-only", attached.detail)
         self.assertIn("thread ", attached.detail)
-        self.assertIn("observed 0.0.6+codex", attached.detail)
+        self.assertIn(f"observed {CODEX_HOOK_GENERATION}", attached.detail)
         self.assertIn("reported separately", attached.detail)
         aggregate = checks["codex-generation"]
         self.assertFalse(aggregate.ok)

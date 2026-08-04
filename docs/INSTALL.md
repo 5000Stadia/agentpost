@@ -375,8 +375,11 @@ denied while `send-path` passes, the denial is in the host CLI's permission
 configuration, not in AgentPost.
 
 On managed startup, all queued unread Message-IDs are named together in the
-first native notification turn. To re-fire attention for one existing unread
-letter without duplicating it, its sender runs:
+first native notification turn, but that turn is a consent gate: it reports the
+mailbox and count and asks whether to inspect now, reload or rebind first, or
+defer. It does not include inspection or claim commands before the user chooses.
+To re-fire attention for one existing unread letter without duplicating it, its
+sender runs:
 
 ```sh
 agentpost notify RECIPIENT MESSAGE_ID --mode immediate
@@ -444,8 +447,9 @@ agentpost antigravity --agent app
 Restart through the AgentPost launcher after first installation. It sets the
 per-process mailbox identity, which matters when multiple CLI agents share one
 project root. The plugin uses `PreInvocation` and `Stop` hooks to inject exact
-unread Message-IDs without claiming them. It supports startup/next-prompt
-catch-up and completed-turn idle delivery.
+unread Message-IDs without claiming them. The first host-process snapshot is a
+consent gate; later mail uses the ordinary exact-ID workflow. It supports
+startup/next-prompt catch-up and completed-turn idle delivery.
 
 Antigravity's SDK documents external pushes into SDK-owned sessions. Current
 official material does not document waking an arbitrary IDE/App-owned idle
@@ -454,26 +458,40 @@ conversation, and live CLI 1.1.1 acceptance exposed no already-idle wake path.
 conservatively see delivery as queued. Do not compensate with terminal
 keystroke injection or a duplicate message channel.
 
-Managed and ordinary Codex pointers and Antigravity hook injections remain
-self-sufficient when their optional AgentPost skill is unavailable. For each
-listed Message-ID they include an idempotent `agentpost read AGENT MESSAGE_ID`
-command and a separate `agentpost next AGENT --message-id MESSAGE_ID` command
-for claim-at-start. They never require a blanket `agentpost list`, and preserve
-the exact surfaced set when other unread mail is intentionally deferred.
+Post-startup managed and ordinary Codex pointers and Antigravity hook injections
+remain self-sufficient when their optional AgentPost skill is unavailable. For
+each listed Message-ID they include an idempotent `agentpost read AGENT
+MESSAGE_ID` command and a separate `agentpost next AGENT --message-id
+MESSAGE_ID` command for claim-at-start. Startup gates intentionally omit those
+commands until the user consents. Neither form requires a blanket `agentpost
+list`, and both preserve the exact surfaced set when other unread mail is
+intentionally deferred.
 
 ## Recovery
 
 Mail delivery does not depend on an adapter being healthy. If a native bell
-fails, restart the CLI integration and inspect the complete unread set:
+fails, restart the CLI integration; its startup gate will report the queued
+count and wait for the user's choice. After explicit approval to inspect, these
+commands diagnose or recover the exact mailbox:
 
 ```sh
-agentpost list AGENT
+agentpost read AGENT GATED_MESSAGE_ID
 agentpost armed AGENT
 agentpost status AGENT
 agentpost profiles --offline
 agentpost doctor AGENT --project /work/project --cli claude
 agentpost doctor AGENT --project /work/project --cli codex
 ```
+
+If status reports a suspended managed owner that the user intended to close,
+run only the exact instance-guarded command printed by AgentPost:
+
+```sh
+agentpost consumer-stop AGENT --instance FULL_INSTANCE_ID
+```
+
+Then retry the original named launcher. This recovery does not delete or move
+mail and is not a reason to create a numbered mailbox.
 
 For incomplete Codex trust, approve the stable AgentPost hooks in `/hooks`. For
 a stale installed cache, close all Codex sessions and re-run `agentpost install

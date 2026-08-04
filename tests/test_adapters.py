@@ -8,10 +8,11 @@ import unittest
 import json
 import os
 import re
+import signal
 import shlex
 import subprocess
 import tomllib
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 from pathlib import Path
@@ -28,11 +29,13 @@ from agentpost import (  # noqa: E402
     RecordingBell,
 )
 from agentpost.native import (  # noqa: E402
+    _ManagedTerminalSignal,
     _antigravity_instruction,
     antigravity_hook,
     antigravity_launch,
     _claude_boundary_state,
     _emit_claude,
+    _emit_claude_startup,
     _codex_bridge_marker,
     _codex_remote_command,
     claude_boundary,
@@ -66,6 +69,11 @@ from agentpost.installer import (  # noqa: E402
 )
 from agentpost.presence import agent_presence  # noqa: E402
 from agentpost.ownership import ConsumerLease  # noqa: E402
+from agentpost.ownership import (  # noqa: E402
+    codex_session_digest,
+    consumer_lock_held,
+    stop_managed_consumer,
+)
 
 
 def profile(name: str) -> Profile:
@@ -229,6 +237,119 @@ lease.release()
             owner.release()
         self.assertEqual(result.stdout.strip(), "blocked")
 
+    def test_suspended_consumer_is_not_reported_offline_or_parallel(self) -> None:
+        office = self.office()
+        source = Path(__file__).parents[1] / "src"
+        script = """
+from agentpost import PostOffice
+from agentpost.ownership import ConsumerLease
+import os
+import sys
+import time
+lease = ConsumerLease(PostOffice(sys.argv[1]), "k", "codex", instance_id="stopped-instance")
+lease.require()
+print(os.getpid(), flush=True)
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    pass
+finally:
+    lease.release()
+"""
+        process = subprocess.Popen(
+            [sys.executable, "-c", script, str(self.root)],
+            env={**os.environ, "PYTHONPATH": str(source)},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            pid = int(process.stdout.readline().strip())
+            os.kill(pid, signal.SIGSTOP)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                state = Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1][0]
+                if state == "T":
+                    break
+                time.sleep(0.01)
+            presence = agent_presence(office, "k")
+            self.assertEqual(presence.state, "suspended")
+            self.assertIn(f"pid {pid}", presence.detail)
+            self.assertIn("stopped-instance", presence.detail)
+            contender = ConsumerLease(office, "k", "codex")
+            with self.assertRaisesRegex(
+                AgentPostError,
+                r"suspended inbound consumer.*consumer-stop k.*Do not create k2",
+            ):
+                contender.require()
+        finally:
+            if process.poll() is None:
+                os.kill(process.pid, signal.SIGINT)
+                os.kill(process.pid, signal.SIGCONT)
+                process.wait(timeout=3)
+            if process.stdout is not None:
+                process.stdout.close()
+            if process.stderr is not None:
+                process.stderr.close()
+        self.assertEqual(agent_presence(office, "k").state, "offline")
+
+    def test_consumer_stop_releases_exact_managed_instance_without_touching_mail(
+        self,
+    ) -> None:
+        office = self.office()
+        sent = office.send("cx", "k", "preserve me")
+        source = Path(__file__).parents[1] / "src"
+        script = """
+from agentpost import PostOffice
+from agentpost.ownership import ConsumerLease
+import os
+import sys
+import time
+lease = ConsumerLease(PostOffice(sys.argv[1]), "k", "codex", instance_id="exact-instance")
+lease.require()
+print(os.getpid(), flush=True)
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    pass
+finally:
+    lease.release()
+"""
+        process = subprocess.Popen(
+            [sys.executable, "-c", script, str(self.root)],
+            env={**os.environ, "PYTHONPATH": str(source)},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            pid = int(process.stdout.readline().strip())
+            with patch("agentpost.ownership._is_managed_launcher", return_value=True):
+                owner = stop_managed_consumer(
+                    office,
+                    "k",
+                    "exact-instance",
+                    timeout=3,
+                )
+            self.assertEqual(owner["pid"], pid)
+            process.wait(timeout=3)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=3)
+            if process.stdout is not None:
+                process.stdout.close()
+            if process.stderr is not None:
+                process.stderr.close()
+        lock = self.root / "agents" / "k" / "adapter" / "consumer.lock"
+        self.assertFalse(consumer_lock_held(lock))
+        self.assertEqual(
+            [record.letter.message_id for record in office.list_messages("k", "unread")],
+            [sent.message_id],
+        )
+
     def test_notification_failure_does_not_undo_delivery(self) -> None:
         class BrokenBell:
             def notify(self, agent, message_id, mode):
@@ -355,6 +476,26 @@ lease.release()
             "unread message not found|already claimed",
         )
 
+    def test_claude_startup_batches_mail_into_one_consent_gate(self) -> None:
+        office = self.office()
+        sent = (
+            office.send("cx", "k", "first startup message"),
+            office.send("cx", "k", "second startup message", notify="immediate"),
+        )
+        records = [office.read("k", item.message_id) for item in sent]
+        output = StringIO()
+        with redirect_stdout(output):
+            _emit_claude_startup("k", records)
+        notice = output.getvalue()
+        self.assertIn("AgentPost startup notice: 2 unread message(s)", notice)
+        self.assertIn("mailbox k", notice)
+        for item in sent:
+            self.assertIn(item.message_id, notice)
+        self.assertIn("ask whether to inspect", notice)
+        self.assertNotIn("agentpost read", notice)
+        self.assertNotIn("agentpost next", notice)
+        self.assertEqual(len(office.list_messages("k", "unread")), 2)
+
     def test_idle_waits_for_completion_while_immediate_surfaces(self) -> None:
         bell = BoundaryBell()
         office = self.office(bell)
@@ -454,7 +595,7 @@ lease.release()
         plugin_list = [
             {
                 "id": "agentpost@agentpost-local",
-                "version": "0.0.7",
+                "version": "0.0.8",
                 "enabled": True,
                 "projectPath": str(Path(self.temp.name) / "other"),
             },
@@ -476,12 +617,12 @@ lease.release()
         self.assertFalse(stale.ok)
         self.assertIn("stale version 0.0.4", stale.detail)
 
-        plugin_list[1]["version"] = "0.0.7"
+        plugin_list[1]["version"] = "0.0.8"
         completed.stdout = json.dumps(plugin_list)
         with patch("agentpost.installer.subprocess.run", return_value=completed):
             current = _doctor_claude(project)[0]
         self.assertTrue(current.ok)
-        self.assertEqual(_claude_plugin_version(), "0.0.7")
+        self.assertEqual(_claude_plugin_version(), "0.0.8")
 
     def test_codex_snapshot_is_machine_readable_and_non_claiming(self) -> None:
         office = self.office()
@@ -760,23 +901,165 @@ lease.release()
         hook_output = result["hookSpecificOutput"]
         self.assertEqual(hook_output["hookEventName"], "UserPromptSubmit")
         first_id, second_id = (item.message_id for item in sent)
-        self.assertEqual(
-            hook_output["additionalContext"],
-            f"AgentPost has 2 unread message(s) for cx: {first_id}, {second_id}. "
-            "Load the agentpost skill if available. Inspect exactly the listed "
-            f"Message-ID(s) with: `agentpost read cx '{first_id}'`; "
-            f"`agentpost read cx '{second_id}'`. Do not list, read, claim, or "
-            "process any other unread mail. Claim each only when starting its "
-            f"work with: `agentpost next cx --message-id '{first_id}'`; "
-            f"`agentpost next cx --message-id '{second_id}'`. Reply by Message-ID "
-            "when appropriate and give the user a short synopsis.",
-        )
+        instruction = hook_output["additionalContext"]
+        self.assertIn("AgentPost startup notice: 2 unread message(s)", instruction)
+        self.assertIn("mailbox cx", instruction)
+        self.assertIn(first_id, instruction)
+        self.assertIn(second_id, instruction)
+        self.assertIn("ask whether to inspect", instruction)
+        self.assertNotIn("agentpost read", instruction)
+        self.assertNotIn("agentpost next", instruction)
         self.assertEqual(len(office.list_messages("cx", "unread")), 2)
         observed = json.loads(
             codex_hook_marker(office, "cx", "user-prompt-submit").read_text()
         )
         self.assertEqual(observed["session_id"], "session-1")
         self.assertEqual(observed["event"], "user-prompt-submit")
+
+        output = StringIO()
+        event = StringIO(json.dumps({"cwd": str(project), "session_id": "session-1"}))
+        with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+            with patch("sys.stdin", event), redirect_stdout(output):
+                self.assertEqual(codex_hook("user-prompt-submit", "generation-3"), 0)
+        self.assertEqual(output.getvalue().strip(), "{}")
+
+        live = office.send("k", "cx", "arrived after startup")
+        output = StringIO()
+        event = StringIO(json.dumps({"cwd": str(project), "session_id": "session-1"}))
+        with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+            with patch("sys.stdin", event), redirect_stdout(output):
+                self.assertEqual(codex_hook("user-prompt-submit", "generation-3"), 0)
+        live_instruction = json.loads(output.getvalue())["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        self.assertIn(f"agentpost read cx '{live.message_id}'", live_instruction)
+        self.assertNotIn(first_id, live_instruction)
+
+    def test_codex_mail_after_an_empty_session_start_is_live(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "cx-empty-start-project"
+        project.mkdir()
+        office.register_profile(
+            Profile(
+                name="cx",
+                display_name="CX",
+                cli="codex",
+                kind="project",
+                summary="Agent cx",
+                projects=("cx",),
+                project_roots=(str(project),),
+            )
+        )
+        environment = {"AGENTPOST_ROOT": str(self.root)}
+        event = {"cwd": str(project), "session_id": "empty-start-session"}
+
+        output = StringIO()
+        with patch.dict("os.environ", environment, clear=False):
+            with patch(
+                "sys.stdin", StringIO(json.dumps(event))
+            ), redirect_stdout(output):
+                self.assertEqual(codex_hook("session-start", "generation-3"), 0)
+        self.assertEqual(output.getvalue().strip(), "{}")
+
+        live = office.send("k", "cx", "arrived after empty startup")
+        output = StringIO()
+        with patch.dict("os.environ", environment, clear=False):
+            with patch(
+                "sys.stdin", StringIO(json.dumps(event))
+            ), redirect_stdout(output):
+                self.assertEqual(codex_hook("user-prompt-submit", "generation-3"), 0)
+        instruction = json.loads(output.getvalue())["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        self.assertNotIn("AgentPost startup notice", instruction)
+        self.assertIn(f"agentpost read cx '{live.message_id}'", instruction)
+
+    def test_codex_resume_rejects_same_thread_under_another_seat(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "shared-codex-project"
+        project.mkdir()
+        for name in ("c", "cr"):
+            office.register_profile(
+                Profile(
+                    name=name,
+                    display_name=name.upper(),
+                    cli="codex",
+                    kind="role",
+                    summary=f"Role {name}",
+                    projects=("shared",),
+                    project_roots=(str(project),),
+                )
+            )
+        thread_id = "019fcbb6-a29f-7eb1-ab24-d2d53a05f061"
+        owner = ConsumerLease(
+            office,
+            "c",
+            "codex",
+            instance_id="owner-instance",
+            session_digest=codex_session_digest(thread_id),
+        )
+        owner.require()
+        try:
+            with patch("agentpost.ownership._is_managed_launcher", return_value=True):
+                with patch("sys.stdin.isatty", return_value=True):
+                    with self.assertRaisesRegex(
+                        AgentPostError,
+                        r"already managed under AgentPost seat c.*consumer-stop c",
+                    ):
+                        codex_launch(
+                            office,
+                            project,
+                            ["resume", thread_id],
+                            agent="cr",
+                        )
+        finally:
+            owner.release()
+
+    def test_codex_launcher_converts_terminal_suspend_to_clean_shutdown(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "suspend-project"
+        project.mkdir()
+
+        class FakeProcess:
+            returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self):
+                self.returncode = 0
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        server = FakeProcess()
+        bridge = FakeProcess()
+        errors = StringIO()
+        with patch("agentpost.native._free_loopback_port", return_value=4321), \
+                patch("agentpost.native._wait_for_app_server"), \
+                patch("agentpost.native.subprocess.Popen", side_effect=[server, bridge]), \
+                patch(
+                    "agentpost.native.subprocess.call",
+                    side_effect=_ManagedTerminalSignal(signal.SIGTSTP),
+                ), \
+                patch("sys.stdin.isatty", return_value=True), \
+                redirect_stderr(errors):
+            self.assertEqual(
+                codex_launch(
+                    office,
+                    project,
+                    ["resume", "thread-1"],
+                    agent="cx",
+                ),
+                148,
+            )
+        self.assertIn("stopped cleanly rather than suspended", errors.getvalue())
+        self.assertIn(
+            "agentpost codex --agent cx resume thread-1",
+            errors.getvalue(),
+        )
+        self.assertFalse((self.root / "agents/cx/adapter/consumer.json").exists())
+        self.assertFalse(_codex_bridge_marker(office, "cx").exists())
 
     def test_codex_hook_stamps_before_bridge_environment_suppression(self) -> None:
         office = self.office()
@@ -1576,7 +1859,11 @@ lease.release()
             with patch("sys.stdin", StringIO(json.dumps(event))), redirect_stdout(output):
                 self.assertEqual(antigravity_hook("pre-invocation"), 0)
         injected = json.loads(output.getvalue())
-        self.assertIn(first.message_id, injected["injectSteps"][0]["ephemeralMessage"])
+        startup_notice = injected["injectSteps"][0]["ephemeralMessage"]
+        self.assertIn(first.message_id, startup_notice)
+        self.assertIn("AgentPost startup notice", startup_notice)
+        self.assertIn("ask whether to inspect", startup_notice)
+        self.assertNotIn("agentpost read", startup_notice)
         self.assertEqual(len(office.list_messages("ag", "unread")), 1)
         self.assertEqual(agent_presence(office, "ag").state, "working")
 
@@ -1605,9 +1892,99 @@ lease.release()
         self.assertEqual(stopped["decision"], "continue")
         self.assertIn(second.message_id, stopped["reason"])
         self.assertNotIn(first.message_id, stopped["reason"])
+        self.assertIn("agentpost read", stopped["reason"])
         self.assertEqual(len(office.list_messages("ag", "unread")), 2)
         self.assertEqual(agent_presence(office, "ag").state, "idle")
         self.assertFalse(armed(office, "ag")[0])
+
+    def test_antigravity_new_runtime_epoch_gates_same_unread_set_again(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "antigravity-reload-project"
+        project.mkdir()
+        office.register_profile(
+            Profile(
+                name="ag",
+                display_name="Antigravity",
+                cli="antigravity",
+                kind="project",
+                summary="Antigravity reload test",
+                projects=("antigravity-reload",),
+                project_roots=(str(project),),
+            )
+        )
+        sent = office.send("cx", "ag", "still unread after reload")
+        event = {
+            "conversationId": "same-conversation",
+            "workspacePaths": [str(project)],
+        }
+        notices = []
+        with patch.dict("os.environ", {"AGENTPOST_ROOT": str(self.root)}, clear=False):
+            with patch(
+                "agentpost.native._host_runtime_epoch",
+                side_effect=("runtime-one", "runtime-two"),
+            ):
+                for _ in range(2):
+                    output = StringIO()
+                    with patch("sys.stdin", StringIO(json.dumps(event))), redirect_stdout(output):
+                        self.assertEqual(antigravity_hook("pre-invocation"), 0)
+                    notices.append(
+                        json.loads(output.getvalue())["injectSteps"][0][
+                            "ephemeralMessage"
+                        ]
+                    )
+        for notice in notices:
+            self.assertIn("AgentPost startup notice", notice)
+            self.assertIn(sent.message_id, notice)
+            self.assertNotIn("agentpost read", notice)
+        self.assertEqual(len(office.list_messages("ag", "unread")), 1)
+
+    def test_antigravity_mail_after_an_empty_start_is_live(self) -> None:
+        office = self.office()
+        project = Path(self.temp.name) / "antigravity-empty-start-project"
+        project.mkdir()
+        office.register_profile(
+            Profile(
+                name="ag",
+                display_name="Antigravity",
+                cli="antigravity",
+                kind="project",
+                summary="Antigravity empty startup test",
+                projects=("antigravity-empty-start",),
+                project_roots=(str(project),),
+            )
+        )
+        event = {
+            "conversationId": "empty-start-conversation",
+            "workspacePaths": [str(project)],
+        }
+        environment = {"AGENTPOST_ROOT": str(self.root)}
+
+        output = StringIO()
+        with patch.dict("os.environ", environment, clear=False):
+            with patch(
+                "agentpost.native._host_runtime_epoch", return_value="runtime-one"
+            ):
+                with patch(
+                    "sys.stdin", StringIO(json.dumps(event))
+                ), redirect_stdout(output):
+                    self.assertEqual(antigravity_hook("pre-invocation"), 0)
+        self.assertEqual(json.loads(output.getvalue()), {"injectSteps": []})
+
+        live = office.send("cx", "ag", "arrived after empty startup")
+        output = StringIO()
+        with patch.dict("os.environ", environment, clear=False):
+            with patch(
+                "agentpost.native._host_runtime_epoch", return_value="runtime-one"
+            ):
+                with patch(
+                    "sys.stdin", StringIO(json.dumps(event))
+                ), redirect_stdout(output):
+                    self.assertEqual(antigravity_hook("pre-invocation"), 0)
+        instruction = json.loads(output.getvalue())["injectSteps"][0][
+            "ephemeralMessage"
+        ]
+        self.assertNotIn("AgentPost startup notice", instruction)
+        self.assertIn(f"agentpost read ag '{live.message_id}'", instruction)
 
     def test_antigravity_pointer_is_exact_and_commands_are_executable(self) -> None:
         office = self.office()

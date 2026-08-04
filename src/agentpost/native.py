@@ -5,6 +5,7 @@ import json
 import os
 import select
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -17,8 +18,12 @@ from .adapters import MailboxWatcher
 from .codex_generation import CODEX_HOOK_GENERATION, codex_hook_marker
 from .codex_lock import CodexPluginLock
 from .core import AgentPostError, PostOffice
-from .ownership import ConsumerLease
-from .presence import HEARTBEAT_INTERVAL_SECONDS
+from .ownership import (
+    ConsumerLease,
+    codex_session_digest,
+    find_managed_codex_thread,
+)
+from .presence import HEARTBEAT_INTERVAL_SECONDS, agent_presence
 from .routing import identify_agent
 
 
@@ -78,6 +83,7 @@ def claude_monitor() -> int:
     )
     deferred = []
     last_heartbeat = 0.0
+    startup = True
     try:
         while True:
             if not lease.acquired:
@@ -98,11 +104,17 @@ def claude_monitor() -> int:
                     },
                 )
                 last_heartbeat = now
-            for record in watcher.pending():
-                if record.letter.notify == "idle" and state == "busy":
-                    deferred.append(record)
-                else:
-                    _emit_claude(profile.name, record)
+            pending = watcher.pending()
+            if startup:
+                if pending:
+                    _emit_claude_startup(profile.name, pending)
+                startup = False
+            else:
+                for record in pending:
+                    if record.letter.notify == "idle" and state == "busy":
+                        deferred.append(record)
+                    else:
+                        _emit_claude(profile.name, record)
             if state == "idle" and deferred:
                 for record in deferred:
                     _emit_claude(profile.name, record)
@@ -154,14 +166,44 @@ def codex_hook(event_name: str, generation: str | None = None) -> int:
             return 0
         unread = office.list_messages(profile.name, "unread")
         requests = office.notification_requests(profile.name)
+        ledger_path = _codex_startup_ledger(office, profile.name, session_id)
         if not unread:
+            if not ledger_path.exists():
+                _write_notification_ledger(
+                    ledger_path,
+                    set(),
+                    runtime_epoch=f"codex:{session_id}",
+                )
             print("{}")
             return 0
-        instruction = _exact_mail_instruction(
-            profile.name,
-            unread,
-            skill_instruction="Load the agentpost skill if available.",
-        )
+        announced = _notification_ledger_ids(ledger_path)
+        startup = event_name == "session-start" or not ledger_path.exists()
+        if startup:
+            pending = unread
+            instruction = _startup_mail_instruction(
+                profile.name,
+                pending,
+                skill_instruction="Load the agentpost skill if available.",
+            )
+            _write_notification_ledger(
+                ledger_path,
+                {record.letter.message_id for record in pending},
+                runtime_epoch=f"codex:{session_id}",
+            )
+        else:
+            pending = [
+                record
+                for record in unread
+                if record.letter.message_id not in announced
+            ]
+            if not pending:
+                print("{}")
+                return 0
+            instruction = _exact_mail_instruction(
+                profile.name,
+                pending,
+                skill_instruction="Load the agentpost skill if available.",
+            )
         hook_event_names = {
             "session-start": "SessionStart",
             "user-prompt-submit": "UserPromptSubmit",
@@ -185,7 +227,7 @@ def codex_hook(event_name: str, generation: str | None = None) -> int:
         else:
             print("{}")
         if surfaced:
-            unread_ids = {record.letter.message_id for record in unread}
+            unread_ids = {record.letter.message_id for record in pending}
             for request in requests:
                 if request.message_id in unread_ids:
                     office.acknowledge_notification(profile.name, request.request_id)
@@ -275,7 +317,10 @@ def antigravity_hook(event_name: str) -> int:
         requests = office.notification_requests(profile.name)
         forced = {request.message_id for request in requests}
         ledger_path = _antigravity_ledger(office, profile.name, event)
-        notified = _antigravity_notified(ledger_path)
+        runtime_epoch = _host_runtime_epoch()
+        ledger = _notification_ledger(ledger_path)
+        startup = ledger.get("runtime_epoch") != runtime_epoch
+        notified = set() if startup else _notification_ledger_ids(ledger_path)
         pending = [
             record
             for record in unread
@@ -283,16 +328,30 @@ def antigravity_hook(event_name: str) -> int:
             or record.letter.message_id in forced
         ]
         if not pending:
+            if startup:
+                _write_notification_ledger(
+                    ledger_path,
+                    set(),
+                    runtime_epoch=runtime_epoch,
+                )
             print(_antigravity_empty_output(event_name))
             return 0
 
-        instruction = _antigravity_instruction(profile.name, pending)
+        instruction = _antigravity_instruction(
+            profile.name,
+            pending,
+            startup=startup,
+        )
         if event_name == "pre-invocation":
             print(json.dumps({"injectSteps": [{"ephemeralMessage": instruction}]}))
         else:
             print(json.dumps({"decision": "continue", "reason": instruction}))
         notified.update(record.letter.message_id for record in pending)
-        _atomic_json(ledger_path, {"notified": sorted(notified)})
+        _write_notification_ledger(
+            ledger_path,
+            notified,
+            runtime_epoch=runtime_epoch,
+        )
         pending_ids = {record.letter.message_id for record in pending}
         for request in requests:
             if request.message_id in pending_ids:
@@ -323,13 +382,40 @@ def codex_launch(
             "live-wake bridge; headless services should embed agentpost.AgentRuntime, "
             "while ordinary Codex lifecycle hooks provide next-boundary catch-up"
         )
+    thread_id = _codex_resume_thread_id(codex_args)
+    thread_digest = codex_session_digest(thread_id) if thread_id else None
+    if thread_digest:
+        conflict = find_managed_codex_thread(
+            office,
+            thread_digest,
+            exclude_agent=profile.name,
+        )
+        if conflict is not None:
+            owner_agent, owner = conflict
+            owner_instance = owner.get("instance_id", "?")
+            owner_pid = owner.get("pid", "?")
+            presence = agent_presence(office, owner_agent)
+            raise AgentPostError(
+                f"Codex thread {thread_id} is already managed under AgentPost seat "
+                f"{owner_agent}: {presence.state}, pid {owner_pid}, instance "
+                f"{owner_instance}. Stop that exact owner with `agentpost "
+                f"consumer-stop {owner_agent} --instance {owner_instance}` and "
+                f"then relaunch under {profile.name}. `agentpost attach` is "
+                "boundary-only and cannot transfer a live bridge"
+            )
     plugin_lock = CodexPluginLock()
     if not plugin_lock.acquire_shared():
         raise AgentPostError(
             "Codex cannot start while AgentPost is replacing the global Codex "
             "plugin; retry after the install completes"
         )
-    lease = ConsumerLease(office, profile.name, "codex", cwd=cwd)
+    lease = ConsumerLease(
+        office,
+        profile.name,
+        "codex",
+        cwd=cwd,
+        session_digest=thread_digest,
+    )
     try:
         lease.require()
     except Exception:
@@ -338,6 +424,7 @@ def codex_launch(
     marker = _codex_bridge_marker(office, profile.name)
     server = None
     bridge = None
+    signal_handlers = _install_managed_signal_handlers()
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
         _atomic_json(
@@ -398,10 +485,20 @@ def codex_launch(
                 f"{bridge.returncode}"
             )
         command = _codex_remote_command(url, codex_args)
-        try:
-            return subprocess.call(command, cwd=cwd, env=environment)
-        except KeyboardInterrupt:
-            return 130
+        return subprocess.call(command, cwd=cwd, env=environment)
+    except _ManagedTerminalSignal as exc:
+        resume_command = shlex.join(
+            ["agentpost", "codex", "--agent", profile.name, *codex_args]
+        )
+        print(
+            "agentpost: managed Codex sessions are stopped cleanly rather than "
+            "suspended so their mailbox lease is released; resume with "
+            f"`{resume_command}`",
+            file=sys.stderr,
+        )
+        return 128 + exc.signum
+    except KeyboardInterrupt:
+        return 130
     except FileNotFoundError as exc:
         raise AgentPostError(f"Codex adapter dependency not found: {exc.filename}") from exc
     finally:
@@ -419,7 +516,10 @@ def codex_launch(
                     try:
                         lease.release()
                     finally:
-                        plugin_lock.release()
+                        try:
+                            plugin_lock.release()
+                        finally:
+                            _restore_managed_signal_handlers(signal_handlers)
 
 
 def claude_launch(
@@ -451,18 +551,75 @@ def antigravity_launch(
     environment = os.environ.copy()
     environment["AGENTPOST_AGENT"] = profile.name
     environment["AGENTPOST_CONSUMER_INSTANCE"] = lease.instance_id
+    signal_handlers = _install_managed_signal_handlers()
     try:
         return subprocess.call(["agy", *antigravity_args], cwd=cwd, env=environment)
+    except _ManagedTerminalSignal as exc:
+        resume_command = shlex.join(
+            ["agentpost", "antigravity", "--agent", profile.name, *antigravity_args]
+        )
+        print(
+            "agentpost: managed Antigravity sessions are stopped cleanly rather "
+            "than suspended so their mailbox lease is released; resume with "
+            f"`{resume_command}`",
+            file=sys.stderr,
+        )
+        return 128 + exc.signum
+    except KeyboardInterrupt:
+        return 130
     except FileNotFoundError as exc:
         raise AgentPostError("Antigravity CLI not found") from exc
     finally:
-        lease.release()
+        try:
+            lease.release()
+        finally:
+            _restore_managed_signal_handlers(signal_handlers)
 
 
 def _codex_remote_command(url: str, args: list[str]) -> list[str]:
     if args and args[0] in {"resume", "fork"}:
         return ["codex", args[0], "--remote", url, *args[1:]]
     return ["codex", "--remote", url, *args]
+
+
+def _codex_resume_thread_id(args: list[str]) -> str | None:
+    if not args or args[0] not in {"fork", "resume"}:
+        return None
+    for value in args[1:]:
+        if not value.startswith("-"):
+            return value
+    return None
+
+
+class _ManagedTerminalSignal(BaseException):
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = signum
+
+
+def _raise_managed_terminal_signal(signum, _frame) -> None:
+    raise _ManagedTerminalSignal(int(signum))
+
+
+def _install_managed_signal_handlers() -> dict[int, object]:
+    handlers = {}
+    for signum in (getattr(signal, "SIGHUP", None), getattr(signal, "SIGTSTP", None)):
+        if signum is None:
+            continue
+        try:
+            handlers[signum] = signal.getsignal(signum)
+            signal.signal(signum, _raise_managed_terminal_signal)
+        except (OSError, ValueError):
+            handlers.pop(signum, None)
+    return handlers
+
+
+def _restore_managed_signal_handlers(handlers: dict[int, object]) -> None:
+    for signum, handler in handlers.items():
+        try:
+            signal.signal(signum, handler)
+        except (OSError, ValueError):
+            pass
 
 
 def _codex_bridge_marker(office: PostOffice, agent: str) -> Path:
@@ -497,11 +654,7 @@ def _antigravity_ledger(office: PostOffice, agent: str, event: dict) -> Path:
 
 
 def _antigravity_notified(path: Path) -> set[str]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return {str(item) for item in value.get("notified", [])}
-    except (OSError, TypeError, AttributeError, json.JSONDecodeError):
-        return set()
+    return _notification_ledger_ids(path)
 
 
 def _antigravity_presence_marker(office: PostOffice, agent: str) -> Path:
@@ -514,11 +667,31 @@ def _antigravity_empty_output(event_name: str) -> str:
     return json.dumps({"decision": "stop"})
 
 
-def _antigravity_instruction(agent: str, records: list) -> str:
-    return _exact_mail_instruction(
+def _antigravity_instruction(agent: str, records: list, *, startup: bool = False) -> str:
+    renderer = _startup_mail_instruction if startup else _exact_mail_instruction
+    return renderer(
         agent,
         records,
         skill_instruction="Use the agentpost skill if available.",
+    )
+
+
+def _startup_mail_instruction(
+    agent: str,
+    records: list,
+    *,
+    skill_instruction: str,
+) -> str:
+    pointers = ", ".join(record.letter.message_id for record in records)
+    return (
+        f"AgentPost startup notice: {len(records)} unread message(s) exist for "
+        f"mailbox {agent}. The exact pending set is: {pointers}. They remain unread "
+        "and unclaimed. Do not list, read, claim, reply to, or begin work from "
+        f"them yet. {skill_instruction} Tell the user that mail is waiting and ask "
+        "whether to inspect this exact set in the current session, reload or "
+        "rebind the intended session first, or defer it. Do not make the choice "
+        "for the user. If the user chooses reload or defer, leave every message "
+        "untouched."
     )
 
 
@@ -557,6 +730,53 @@ def _mail_cli_commands(
         for message_id in message_ids
     )
     return reads, claims
+
+
+def _codex_startup_ledger(office: PostOffice, agent: str, session_id: str) -> Path:
+    token = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:20]
+    return office.root / "agents" / agent / "adapter" / f"codex-startup-{token}.json"
+
+
+def _notification_ledger(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _notification_ledger_ids(path: Path) -> set[str]:
+    value = _notification_ledger(path)
+    try:
+        return {str(item) for item in value.get("notified", [])}
+    except (TypeError, AttributeError):
+        return set()
+
+
+def _write_notification_ledger(
+    path: Path,
+    message_ids: set[str],
+    *,
+    runtime_epoch: str,
+) -> None:
+    _atomic_json(
+        path,
+        {
+            "runtime_epoch": runtime_epoch,
+            "notified": sorted(message_ids),
+        },
+    )
+
+
+def _host_runtime_epoch() -> str:
+    pid = os.getppid()
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = stat[stat.rfind(")") + 2 :].split()
+        start_ticks = fields[19]
+    except (OSError, IndexError):
+        start_ticks = str(time.time_ns())
+    return f"{pid}:{start_ticks}"
 
 
 def _free_loopback_port() -> int:
@@ -649,5 +869,16 @@ def _emit_claude(agent: str, record) -> None:
         "list, read, claim, or process any other unread mail. Claim only when "
         f"starting its work with `{claim_command}`. Reply by Message-ID when "
         "appropriate and give the user a short synopsis.",
+        flush=True,
+    )
+
+
+def _emit_claude_startup(agent: str, records) -> None:
+    print(
+        _startup_mail_instruction(
+            agent,
+            list(records),
+            skill_instruction="Load `/agentpost:agentpost` if available.",
+        ),
         flush=True,
     )

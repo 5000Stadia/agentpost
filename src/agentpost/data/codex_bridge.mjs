@@ -128,7 +128,7 @@ async function initialCatchup() {
   messages.forEach((item) => known.add(deliveryId(item)));
   const groups = coalesce(messages);
   const mode = strongestMode(groups);
-  await deliver(groups, mode);
+  await deliver(groups, mode, { startup: true });
   trace("startup-catchup", {
     ids: [...new Set(messages.map((item) => item.message_id))],
     deliveries: messages.length,
@@ -150,7 +150,7 @@ async function refreshTurnId() {
   }
 }
 
-async function deliver(items, mode) {
+async function deliver(items, mode, { startup = false } = {}) {
   const ids = items.map((item) => item.message_id);
   const reads = ids.map(
     (id) => `agentpost read ${options.agent} ${quoteShell(id)}`,
@@ -158,14 +158,22 @@ async function deliver(items, mode) {
   const claims = ids.map(
     (id) => `agentpost next ${options.agent} --message-id ${quoteShell(id)}`,
   );
-  const text =
-    `AgentPost ${mode} mail is waiting for ${options.agent}: ${ids.join(", ")}. ` +
-    "Load the agentpost skill if available. Inspect exactly the listed " +
-    `Message-ID(s) with: ${reads.map(code).join("; ")}. Do not ` +
-    "list, read, claim, or process any other unread mail during this turn; other " +
-    "messages may be intentionally deferred. Claim each only when starting its " +
-    `work with: ${claims.map(code).join("; ")}. Reply by Message-ID when ` +
-    "appropriate and give the user a short synopsis.";
+  const text = startup
+    ? `AgentPost startup notice: ${ids.length} unread message(s) exist for mailbox ` +
+      `${options.agent}. The exact pending set is: ${ids.join(", ")}. They remain ` +
+      "unread and unclaimed. Do not list, read, claim, reply to, or begin work " +
+      "from them yet. Load the agentpost skill if available. Tell the user that " +
+      "mail is waiting and ask whether to inspect this exact set in the current " +
+      "session, reload or rebind the intended session first, or defer it. Do not " +
+      "make the choice for the user. If the user chooses reload or defer, leave " +
+      "every message untouched."
+    : `AgentPost ${mode} mail is waiting for ${options.agent}: ${ids.join(", ")}. ` +
+      "Load the agentpost skill if available. Inspect exactly the listed " +
+      `Message-ID(s) with: ${reads.map(code).join("; ")}. Do not ` +
+      "list, read, claim, or process any other unread mail during this turn; other " +
+      "messages may be intentionally deferred. Claim each only when starting its " +
+      `work with: ${claims.map(code).join("; ")}. Reply by Message-ID when ` +
+      "appropriate and give the user a short synopsis.";
   const input = [{ type: "text", text, text_elements: [] }];
   if (active && turnId && mode === "immediate") {
     try {

@@ -61,8 +61,10 @@ Other Examples:
 - Replying atomically claims an exact unread original; already-read originals
   remain replyable for corrections.
 - Notifications are pointers. The mailbox is always the durable truth.
-- Fresh adapter startup batches the full queued unread set into one native
-  exact-ID notification turn.
+- Fresh interactive-adapter startup batches the full queued unread set into one
+  consent gate. The agent reports the mailbox and count, then asks whether to
+  inspect that exact set now, reload or rebind first, or defer it. Startup
+  priority never authorizes reading or claiming mail.
 - A mailbox belongs to a durable agent identity, not to one CLI process.
 - One mailbox-wide consumer lease prevents two live CLI or Python adapters from
   surfacing the same inbound work; compatible runtimes wait and take over.
@@ -125,10 +127,12 @@ and specialist queues.
 
 Antigravity CLI 1.1.1 has a validated lifecycle catch-up profile. Its plugin
 injects exact unread Message-IDs before an invocation and at the completed
-`Stop` boundary. Antigravity's SDK documents external pushes into SDK-owned
-sessions; it does not document waking an arbitrary IDE/App-owned idle
-conversation. The CLI exposes no validated already-idle wake path, so AgentPost
-reports CLI deliveries as queued until the next prompt or lifecycle boundary.
+`Stop` boundary. Its first host-process snapshot is a consent gate; later mail
+uses the ordinary exact-ID instruction. Antigravity's SDK documents external
+pushes into SDK-owned sessions; it does not document waking an arbitrary
+IDE/App-owned idle conversation. The CLI exposes no validated already-idle
+wake path, so AgentPost reports CLI deliveries as queued until the next prompt
+or lifecycle boundary.
 Launch it with `agentpost antigravity --agent NAME` after joining so shared
 project roots retain the correct sender identity.
 
@@ -263,6 +267,26 @@ thread already has a managed bridge. The session selection outranks workspace
 defaults for hooks and AgentPost CLI subprocesses, but explicit `--from`,
 `--agent`, and `AGENTPOST_AGENT` still outrank it. See
 [Codex session attach](specs/CODEX-SESSION-ATTACH-V1.md).
+
+Managed consumers report held leases independently from heartbeat presence. A
+suspended terminal job therefore appears as `suspended`, not misleadingly
+offline. If the user intended to close that exact managed instance, AgentPost
+prints a guarded recovery command shaped as:
+
+```sh
+agentpost consumer-stop reviewer --instance FULL_INSTANCE_ID
+```
+
+The full instance guard prevents a stale instruction from stopping a
+replacement consumer. It releases the process tree and lease without deleting
+mail, identity state, bindings, or attachments. Managed Codex and Antigravity
+sessions convert terminal suspension into clean shutdown because a stopped
+bridge cannot provide wake while retaining exclusive mailbox ownership.
+
+Managed Codex owner metadata also records a digest of a resumed thread ID. A
+resume under another AgentPost seat fails before startup when that thread is
+already managed elsewhere and prints the existing seat and exact recovery
+command. See [safe session re-entry](specs/SAFE-SESSION-REENTRY-V1.md).
 
 If an existing unread letter needs another native notification, its original
 sender can re-fire attention without resending content:
@@ -419,9 +443,11 @@ idle.
   native monitor event only when unread mail appears. Lifecycle hooks maintain
   a short busy/idle boundary in the mailbox's AgentPost adapter directory. A
   fresh Claude load starts the monitor automatically; no model call is made
-  until mail causes a native event. The event names the optional
-  `/agentpost:agentpost` skill and includes exact positional `read` and `next`
-  commands, so inspection remains retry-safe when the skill is unavailable.
+  until mail causes a native event. Its initial event announces only the queued
+  count and asks whether to inspect, reload, or defer. Later live events name
+  the optional `/agentpost:agentpost` skill and include exact positional `read`
+  and `next` commands, so inspection remains retry-safe when the skill is
+  unavailable.
 - `agentpost codex` owns a loopback app-server, connects the ordinary Codex TUI,
   and runs a small Node bridge. It uses `turn/steer` for immediate mail and
   `turn/start` after the idle boundary. For ordinary Codex launches, plugin
@@ -513,11 +539,13 @@ load; managed Codex must attach its app-server bridge; ordinary Codex proves
 lifecycle-hook catch-up only; Antigravity proves hook injection at its first
 `PreInvocation`; and Python delegates turn creation to its host scheduler.
 
-Every native exact-ID pointer is self-sufficient when its optional skill is not
-available. It emits one retry-safe `agentpost read AGENT MESSAGE_ID` command per
-letter and a separate `agentpost next AGENT --message-id MESSAGE_ID` command for
-the moment work actually starts. Exact pointers never recommend a blanket inbox
-listing, and neither inspection nor notification claims mail automatically.
+Every post-startup native exact-ID pointer is self-sufficient when its optional
+skill is not available. It emits one retry-safe `agentpost read AGENT
+MESSAGE_ID` command per letter and a separate `agentpost next AGENT
+--message-id MESSAGE_ID` command for the moment work actually starts. Startup
+gates intentionally omit those commands until the user consents. Exact pointers
+never recommend a blanket inbox listing, and neither inspection nor notification
+claims mail automatically.
 
 ## Documentation
 

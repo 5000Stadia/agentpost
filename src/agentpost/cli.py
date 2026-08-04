@@ -30,7 +30,7 @@ from .panels import ask, panel_status, wait_for_panel
 from .adapters import MailboxWatcher
 from .codex_session import attach_codex_session
 from .installer import armed, doctor, install, uninstall, upgrade
-from .ownership import ConsumerLease
+from .ownership import ConsumerLease, stop_managed_consumer
 from .presence import agent_presence
 from .review import prepare_review, render_review_request
 from .native import (
@@ -199,6 +199,15 @@ def build_parser() -> argparse.ArgumentParser:
     status = commands.add_parser("status")
     status.add_argument("agent", nargs="?")
     status.add_argument("--project")
+    consumer_stop = commands.add_parser(
+        "consumer-stop",
+        description=(
+            "Gracefully stop one exact AgentPost-managed mailbox consumer "
+            "without deleting mail or identity state."
+        ),
+    )
+    consumer_stop.add_argument("agent")
+    consumer_stop.add_argument("--instance", required=True)
 
     wipe = commands.add_parser(
         "wipe",
@@ -573,6 +582,17 @@ def main(argv: list[str] | None = None) -> int:
             for name in names:
                 presence = agent_presence(office, name)
                 print(f"{name}\t{presence.state}\t{presence.detail}")
+        elif args.command == "consumer-stop":
+            profile = office.load_profile(args.agent)
+            owner = stop_managed_consumer(
+                office,
+                profile.name,
+                args.instance,
+            )
+            print(
+                f"STOPPED\t{profile.name}\t{owner.get('adapter', 'unknown')}\t"
+                f"pid={owner.get('pid', '?')}\tinstance={owner.get('instance_id', '?')}"
+            )
         elif args.command == "wipe":
             _wipe(office, args)
         elif args.command == "send":

@@ -11,7 +11,7 @@ compatibility, security, and release contracts recorded in the repository.
 
 The local four-agent deployment uses AgentPost as its sole actionable
 development-agent channel. The 1.3.0 release packages Claude plugin generation
-0.0.7, Codex plugin generation `0.0.6+codex.20260728214546`, and Python package
+0.0.8, Codex plugin generation `0.0.7+codex.20260804015728`, and Python package
 version 1.3.0.
 Plugin generations identify independently deployed adapter artifacts and do
 not replace the Python package's semantic version.

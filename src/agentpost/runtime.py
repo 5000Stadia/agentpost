@@ -33,6 +33,7 @@ class Notification:
     kind: str
     notify: str
     path: Path
+    origin: str = "live"
 
 
 class AgentRuntime:
@@ -76,6 +77,7 @@ class AgentRuntime:
         self._callback_exhausted: frozenset[str] = frozenset()
         self._stop = threading.Event()
         self._wake = threading.Event()
+        self._startup_pending = True
         self._thread: threading.Thread | None = None
         adapter = self.office.root / "agents" / agent / "adapter"
         instance_id = uuid.uuid4().hex
@@ -97,6 +99,7 @@ class AgentRuntime:
             return self
         self._stop.clear()
         self._wake.clear()
+        self._startup_pending = True
         if self._lease.acquire():
             self._write_heartbeat()
         self._thread = threading.Thread(
@@ -184,7 +187,7 @@ class AgentRuntime:
     def unread(self) -> tuple[Notification, ...]:
         """Return a side-effect-free snapshot for host reconciliation."""
         return tuple(
-            _notification(record)
+            _notification(record, origin="snapshot")
             for record in self.office.list_messages(self.agent, "unread")
         )
 
@@ -216,14 +219,21 @@ class AgentRuntime:
                     last_heartbeat = now
                 self._prune_callback_exhaustion()
                 self._flush_callback()
-                self._surface(self._watcher.pending())
+                origin = "startup" if self._startup_pending else "live"
+                self._surface(self._watcher.pending(), origin=origin)
+                self._startup_pending = False
                 self._wake.wait(self.interval)
                 self._wake.clear()
         finally:
             self._marker.unlink(missing_ok=True)
             self._lease.release()
 
-    def _surface(self, fresh: tuple[MessageRecord, ...]) -> None:
+    def _surface(
+        self,
+        fresh: tuple[MessageRecord, ...],
+        *,
+        origin: str = "live",
+    ) -> None:
         ready = []
         state = self.state
         for record in fresh:
@@ -236,7 +246,7 @@ class AgentRuntime:
             self._deferred.clear()
         if not ready:
             return
-        batch = tuple(_notification(record) for record in ready)
+        batch = tuple(_notification(record, origin=origin) for record in ready)
         self._batches.put(batch)
         if self.on_mail is not None:
             self._callback_pending.append(batch)
@@ -326,7 +336,7 @@ class AgentRuntime:
             )
 
 
-def _notification(record: MessageRecord) -> Notification:
+def _notification(record: MessageRecord, *, origin: str = "live") -> Notification:
     letter = record.letter
     return Notification(
         message_id=letter.message_id,
@@ -334,6 +344,7 @@ def _notification(record: MessageRecord) -> Notification:
         kind=letter.kind,
         notify=letter.notify,
         path=record.path,
+        origin=origin,
     )
 
 

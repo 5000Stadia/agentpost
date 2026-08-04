@@ -81,6 +81,7 @@ class PythonRuntimeTest(unittest.TestCase):
         with AgentRuntime("app", root=self.root, interval=0.01) as runtime:
             batch = runtime.get(timeout=1)
             self.assertEqual(batch[0].message_id, sent.message_id)
+            self.assertEqual(batch[0].origin, "startup")
             self.assertEqual(len(self.office.list_messages("app", "unread")), 1)
 
     def test_callback_failure_retries_in_order_without_duplicating_queue(self) -> None:

@@ -345,29 +345,13 @@ class DocumentationExampleTest(unittest.TestCase):
                 self.assertIsNotNone(turn)
                 instruction = turn["params"]["input"][0]["text"]
                 for message_id in message_ids:
-                    self.assertEqual(instruction.count(message_id), 3)
-                    self.assertIn(
-                        f"`agentpost read cr '{message_id}'`",
-                        instruction,
-                    )
-                    self.assertIn(
-                        f"`agentpost next cr --message-id '{message_id}'`",
-                        instruction,
-                    )
-                read_positions = [
-                    instruction.index(f"`agentpost read cr '{message_id}'`")
-                    for message_id in message_ids
-                ]
-                claim_positions = [
-                    instruction.index(
-                        f"`agentpost next cr --message-id '{message_id}'`"
-                    )
-                    for message_id in message_ids
-                ]
-                self.assertEqual(read_positions, sorted(read_positions))
-                self.assertEqual(claim_positions, sorted(claim_positions))
+                    self.assertEqual(instruction.count(message_id), 1)
+                self.assertIn("AgentPost startup notice", instruction)
+                self.assertIn("ask whether to inspect", instruction)
+                self.assertNotIn("agentpost read", instruction)
+                self.assertNotIn("agentpost next", instruction)
                 self.assertNotIn("agentpost list", instruction)
-                self.assertIn("messages may be intentionally deferred", instruction)
+                self.assertIn("leave every message untouched", instruction)
                 deadline = time.monotonic() + 5
                 while startup_attention.path.exists() and time.monotonic() < deadline:
                     time.sleep(0.05)
@@ -699,7 +683,10 @@ class DocumentationExampleTest(unittest.TestCase):
         self.assertIn("agentpost armed NAME", skill)
         self.assertIn("prove durable access only", skill)
         self.assertIn("while `armed` reports `QUEUED`", skill)
-        self.assertIn("offer the user the first unused numbered mailbox", skill)
+        self.assertRegex(skill, r"first\s+unused\s+numbered\s+mailbox")
+        self.assertIn("## Mail workflow", skill)
+        self.assertIn("### Startup consent gate", skill)
+        self.assertIn("attention gate, not authorization", skill)
         self.assertIn("numbered identity is a separate durable mailbox", skill)
         self.assertIn("move mail already addressed to `NAME`", skill)
         self.assertIn("agentpost attach NAME", skill)
